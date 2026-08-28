@@ -33,7 +33,15 @@ async function getYtDlpPath() {
     return 'yt-dlp';
   }
 
-  // Linux / Vercel Serverless environment
+  // Linux / Render environment
+  const bundledBin = path.join(__dirname, 'bin', 'yt-dlp');
+  if (fs.existsSync(bundledBin)) {
+    try {
+      fs.chmodSync(bundledBin, 0o755);
+    } catch (e) {}
+    return bundledBin;
+  }
+
   const linuxBin = path.join(os.tmpdir(), 'yt-dlp');
   if (fs.existsSync(linuxBin)) {
     try {
