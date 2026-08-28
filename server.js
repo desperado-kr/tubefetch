@@ -94,7 +94,7 @@ function getYtDlpArgs(extraArgs = []) {
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificates',
-    '--extractor-args', 'youtube:player_client=android_embedded,web_embedded,android_vr',
+    '--extractor-args', 'youtube:player_client=mweb,android_embedded;player_skip=webpage,configs',
     '--retries', '5'
   ];
 
