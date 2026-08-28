@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TubeFetch - 고화질 영상 & 음원 원클릭 다운로더</title>
+  <meta name="description" content="YouTube, TikTok, Instagram 등 다양한 소셜 미디어 영상과 고음질 MP3를 1클릭으로 간편하게 다운로드할 수 있는 웹 도구">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Pretendard:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Background Glow & Grid -->
+  <div class="ambient-glow glow-top"></div>
+  <div class="ambient-glow glow-bottom"></div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">TubeFetch</span>
+          <span class="brand-badge" data-i18n="brand_badge">PRO</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="header-status">
+          <span class="status-dot"></span>
+          <span class="status-text" data-i18n="status_ready">엔진 준비됨 (YouTube & 소셜 지원)</span>
+        </div>
+
+        <!-- Language Selector -->
+        <div class="lang-select-wrapper">
+          <select id="langSelect" class="lang-select" title="Language">
+            <option value="ko">🇰🇷 한국어</option>
+            <option value="en">🇺🇸 English</option>
+            <option value="ja">🇯🇵 日本語</option>
+            <option value="zh">🇨🇳 简体中文</option>
+            <option value="es">🇪🇸 Español</option>
+          </select>
+          <svg class="lang-icon-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+
+        <!-- Dark / Light Theme Toggle Button -->
+        <button id="themeToggleBtn" class="btn-theme-toggle" title="테마 전환 (다크/라이트)">
+          <svg id="moonIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+          <svg id="sunIcon" class="hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"/>
+            <line x1="12" y1="1" x2="12" y2="3"/>
+            <line x1="12" y1="21" x2="12" y2="23"/>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+            <line x1="1" y1="12" x2="3" y2="12"/>
+            <line x1="21" y1="12" x2="23" y2="12"/>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Hero -->
+    <main class="main-content">
+      <section class="hero-section">
+        <h1 class="hero-title" id="heroTitle">
+          <span data-i18n="hero_title_prefix">영상 및 음원을 </span><span class="gradient-text" data-i18n="hero_title_highlight">원클릭 고화질</span><span data-i18n="hero_title_suffix">로 다운로드</span>
+        </h1>
+        <p class="hero-desc" data-i18n="hero_desc">
+          유튜브, 틱톡, 인스타그램 릴스 등 링크만 넣으면 4K·1080p MP4와 320kbps MP3로 바로 다운로드합니다.
+        </p>
+
+        <!-- Input Bar -->
+        <div class="input-card">
+          <div class="input-wrapper">
+            <div class="input-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+              </svg>
+            </div>
+            <input 
+              type="text" 
+              id="urlInput" 
+              placeholder="YouTube, TikTok, Instagram 등의 영상 링크를 붙여넣으세요"
+              data-i18n-placeholder="url_placeholder"
+              autocomplete="off"
+              spellcheck="false"
+            >
+            <button id="pasteBtn" class="btn-paste" title="클립보드에서 붙여넣기">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+              </svg>
+              <span data-i18n="paste_btn">붙여넣기</span>
+            </button>
+            <button id="clearBtn" class="btn-clear hidden" title="지우기">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
+          <button id="analyzeBtn" class="btn-primary">
+            <span class="btn-text" data-i18n="analyze_btn">다운로드 준비</span>
+            <div class="spinner hidden"></div>
+          </button>
+        </div>
+
+        <!-- URL Quick Helper & Tips -->
+        <div class="quick-examples">
+          <span class="example-label" data-i18n="supported_links">지원 플랫폼:</span>
+          <span class="example-tag" data-i18n="link_watch">YouTube</span>
+          <span class="example-tag" data-i18n="link_shorts">TikTok</span>
+          <span class="example-tag" data-i18n="link_shortened">Instagram Reels</span>
+        </div>
+      </section>
+
+      <!-- Top Leaderboard Ad Slot (Monetization) -->
+      <div class="ad-banner-slot top-banner">
+        <div class="ad-placeholder">
+          <span class="ad-tag" data-i18n="ad_sponsor_tag">스폰서 광고</span>
+          <div class="ad-content-box">
+            <span class="ad-brand">NordVPN ⚡</span>
+            <span class="ad-headline" data-i18n="ad_vpn_title">해외 차단 영상도 초고속으로 다운로드</span>
+            <a href="https://nordvpn.com" target="_blank" rel="noopener noreferrer" class="btn-ad-cta" data-i18n="ad_vpn_btn">특별 할인받기</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loading State Card -->
+      <div id="loadingCard" class="card loading-card hidden">
+        <div class="loading-animation">
+          <div class="radar-pulse"></div>
+          <svg class="loading-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </div>
+        <h3 class="loading-title" data-i18n="loading_title">영상 정보를 불러오고 있습니다...</h3>
+        <p class="loading-subtitle" data-i18n="loading_desc">최적의 고화질 스트림 및 오디오 트랙을 추출하는 중입니다.</p>
+      </div>
+
+      <!-- Error Card -->
+      <div id="errorCard" class="card error-card hidden">
+        <div class="error-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <div class="error-content">
+          <h4 id="errorTitle" data-i18n="error_title">영상 정보를 불러올 수 없습니다</h4>
+          <p id="errorMsg" data-i18n="error_desc">올바른 영상 링크인지 확인해주세요.</p>
+        </div>
+        <button id="retryBtn" class="btn-outline" data-i18n="retry_btn">다시 시도</button>
+      </div>
+
+      <!-- Video Result & 1-Click Actions Section -->
+      <div id="resultSection" class="result-section hidden">
+        <div class="card video-card">
+          <!-- Video Thumbnail Preview -->
+          <div class="video-preview-wrapper">
+            <img id="videoThumb" src="" alt="Thumbnail" class="video-thumbnail">
+            <span id="videoDuration" class="duration-badge">00:00</span>
+            <span id="shortsBadge" class="shorts-badge hidden">Shorts</span>
+          </div>
+
+          <!-- Video Details & 1-Click Action Cards -->
+          <div class="video-info">
+            <h2 id="videoTitle" class="video-title">동영상 제목</h2>
+            
+            <div class="video-meta">
+              <div class="meta-item author">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                  <circle cx="12" cy="7" r="4"/>
+                </svg>
+                <span id="videoAuthor">채널명</span>
+              </div>
+              <div class="meta-item views">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+                <span id="videoViews">0회</span>
+              </div>
+              <div class="meta-item date">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="16" y1="2" x2="16" y2="6"/>
+                  <line x1="8" y1="2" x2="8" y2="6"/>
+                  <line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+                <span id="videoDate">-</span>
+              </div>
+            </div>
+
+            <!-- Clean 1-Click Action Cards List -->
+            <div class="action-card-list" id="actionCardList">
+              <!-- Dynamically populated via JS with 4 clean action cards -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5-Second Ad Gate Modal (Rewarded Ad Gate) -->
+      <div id="adGateModal" class="modal-overlay hidden">
+        <div class="modal-card ad-gate-card">
+          <div class="ad-modal-header">
+            <div class="ad-modal-title-box">
+              <span class="ad-badge-pulse" data-i18n="ad_sponsor_tag">스폰서 광고</span>
+              <h3 data-i18n="ad_gate_title">고화질 다운로드 준비 중</h3>
+            </div>
+            <div class="countdown-badge">
+              <span id="countdownNumber">5</span><span data-i18n="ad_gate_countdown_suffix">초 후 자동 다운로드</span>
+            </div>
+          </div>
+
+          <p class="ad-modal-desc" data-i18n="ad_gate_desc">초고화질 스트림을 연결하고 있습니다. 잠시 후 자동으로 다운로드가 시작됩니다.</p>
+
+          <!-- Sponsored Ad Display Box (Monetag / Adsterra placeholder) -->
+          <div class="ad-gate-banner-box">
+            <div class="ad-inner-banner">
+              <div class="ad-sponsor-pill">Sponsored Partner</div>
+              <div class="ad-sponsor-content">
+                <div class="ad-sponsor-logo">🛡️ NordVPN</div>
+                <h4 data-i18n="ad_vpn_title">⚡ 해외 차단 영상도 초고속으로 다운로드</h4>
+                <p data-i18n="ad_vpn_desc">NordVPN을 통해 지역 제한 없이 전 세계 고화질 영상을 최고 속도로 안전하게 다운로드하세요.</p>
+                <a href="https://nordvpn.com" target="_blank" rel="noopener noreferrer" class="btn-ad-modal-cta" data-i18n="ad_vpn_btn">특별 할인받기 (최대 70% OFF)</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="ad-modal-footer">
+            <button id="skipAdBtn" class="btn-skip-ad" data-i18n="ad_gate_skip_btn">바로 다운로드 시작</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Real-time Download Progress Card -->
+      <div id="progressModal" class="card progress-card hidden">
+        <div class="progress-header">
+          <div class="progress-indicator">
+            <div class="spinner-small"></div>
+            <h4 id="progressStatusTitle">다운로드 및 변환을 준비하고 있습니다...</h4>
+          </div>
+          <span id="progressPercentBadge" class="percent-badge">0%</span>
+        </div>
+
+        <div class="progress-bar-container">
+          <div id="progressBar" class="progress-bar" style="width: 0%;">
+            <div class="bar-shimmer"></div>
+          </div>
+        </div>
+
+        <div class="progress-stats">
+          <span id="progressSpeed">-</span>
+          <span id="progressSize">-</span>
+          <span id="progressEta">-</span>
+        </div>
+
+        <p id="progressMessage" class="progress-message">서버에서 최고화질 비디오 및 오디오 스트림을 수집 중입니다...</p>
+      </div>
+
+      <!-- Recent Downloads / History -->
+      <section id="historySection" class="history-section hidden">
+        <div class="section-header">
+          <h3 class="section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <span data-i18n="history_title">최근 다운로드 내역</span>
+          </h3>
+          <button id="clearHistoryBtn" class="btn-text-action" data-i18n="history_clear">전체 삭제</button>
+        </div>
+        <div id="historyList" class="history-grid">
+          <!-- History items injected via JS -->
+        </div>
+      </section>
+
+      <!-- FAQ & Legal Guidelines -->
+      <section class="info-section">
+        <div class="info-card">
+          <div class="info-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="16" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <h3 data-i18n="legal_title">이용 안내 및 저작권 주의사항</h3>
+          </div>
+          <ul class="info-list">
+            <li><strong data-i18n="legal_1_title">사적 이용 목적</strong>: <span data-i18n="legal_1_desc">대한민국 저작권법 제30조에 따라, 개인 학습 및 비영리 개인 보관 목적으로만 이용해 주시기 바랍니다.</span></li>
+            <li><strong data-i18n="legal_2_title">재배포 금지</strong>: <span data-i18n="legal_2_desc">다운로드받은 영상 및 음원을 타인에게 재배포하거나 인터넷/SNS에 재업로드하는 행위는 저작권법 위반에 해당합니다.</span></li>
+            <li><strong data-i18n="legal_3_title">고화질 머지</strong>: <span data-i18n="legal_3_desc">1080p 이상의 고화질 비디오는 FFmpeg를 통해 최고음질 오디오 트랙과 실시간으로 합성되어 고화질 MP4로 제공됩니다.</span></li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>TubeFetch • High Performance Universal Video Extraction Web Engine</p>
+    </footer>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

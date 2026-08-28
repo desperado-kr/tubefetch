@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Temporary download files
+temp/
+downloads/
+
+# Binaries (yt-dlp and deno for local development)
+bin/*.exe
+bin/deno*
+bin/yt-dlp*
+
+# Environment & logs
+.env
+.env.local
+*.log
+npm-debug.log*
+
+# Superloopy state
+.superloopy/
+
+# OS metadata
+.DS_Store
+Thumbs.db
