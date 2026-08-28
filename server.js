@@ -75,7 +75,7 @@ async function getYtDlpPath() {
       });
     };
 
-    download('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp');
+    download('https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp');
   });
 
   return ytDlpDownloadPromise;
@@ -86,7 +86,8 @@ function getYtDlpArgs(extraArgs = []) {
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificates',
-    '--extractor-args', 'youtube:player_client=android,ios,mweb',
+    '--extractor-args', 'youtube:player_client=ios,mweb',
+    '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
     '--retries', '5'
   ];
 
