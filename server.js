@@ -86,6 +86,7 @@ function getYtDlpArgs(extraArgs = []) {
     '--no-playlist',
     '--no-warnings',
     '--no-check-certificates',
+    '--extractor-args', 'youtube:player_client=android,ios,mweb',
     '--retries', '5'
   ];
 
@@ -94,12 +95,14 @@ function getYtDlpArgs(extraArgs = []) {
     if (fs.existsSync(denoPath)) {
       args.push('--js-runtimes', `deno:${denoPath}`, '--remote-components', 'ejs:github');
     }
+  } else {
+    args.push('--js-runtimes', 'node', '--remote-components', 'ejs:github');
   }
 
   return [...args, ...extraArgs];
 }
 
-app.use(cors());
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 

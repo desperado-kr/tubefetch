@@ -61,6 +61,12 @@ document.addEventListener('DOMContentLoaded', () => {
   let countdownTimer = null;
   let activeAdFinishCallback = null;
 
+  // Dynamic Backend Routing (Connects Vercel frontend to Render backend)
+  const isLocalOrDirect = window.location.hostname === 'localhost' || 
+                          window.location.hostname === '127.0.0.1' || 
+                          window.location.hostname.includes('onrender.com');
+  const API_BASE = isLocalOrDirect ? '' : 'https://tubefetch-0u2r.onrender.com';
+
   // 1. Initialize Theme
   applyTheme(currentTheme);
 
@@ -222,7 +228,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setButtonLoading(true);
 
     try {
-      const res = await fetch('/api/info', {
+      const res = await fetch(`${API_BASE}/api/info`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url })
@@ -383,7 +389,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function triggerDirectDownload(streamUrl, name, ext) {
     if (!currentVideoData) return;
 
-    const directUrl = `/api/direct-download?stream_url=${encodeURIComponent(streamUrl)}&title=${encodeURIComponent(currentVideoData.title)}`;
+    const directUrl = `${API_BASE}/api/direct-download?stream_url=${encodeURIComponent(streamUrl)}&title=${encodeURIComponent(currentVideoData.title)}`;
     
     const link = document.createElement('a');
     link.href = directUrl;
@@ -423,7 +429,7 @@ document.addEventListener('DOMContentLoaded', () => {
       currentEventSource.close();
     }
 
-    currentEventSource = new EventSource(`/api/progress/${downloadId}`);
+    currentEventSource = new EventSource(`${API_BASE}/api/progress/${downloadId}`);
 
     currentEventSource.onmessage = (event) => {
       try {
@@ -468,7 +474,7 @@ document.addEventListener('DOMContentLoaded', () => {
       console.warn('SSE connection closed:', err);
     };
 
-    const downloadUrl = `/api/download?url=${encodeURIComponent(url)}&type=${type}&quality=${quality}&downloadId=${downloadId}&title=${encodeURIComponent(currentVideoData.title)}`;
+    const downloadUrl = `${API_BASE}/api/download?url=${encodeURIComponent(url)}&type=${type}&quality=${quality}&downloadId=${downloadId}&title=${encodeURIComponent(currentVideoData.title)}`;
     
     const link = document.createElement('a');
     link.href = downloadUrl;
