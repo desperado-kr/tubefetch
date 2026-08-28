@@ -3,6 +3,8 @@ import cors from 'cors';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
+import https from 'https';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -10,15 +12,92 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const isWindows = process.platform === 'win32';
 
-// Ensure directories
-const tempDir = path.join(__dirname, 'temp');
+// Ensure temporary working directory
+const tempDir = path.join(os.tmpdir(), 'tubefetch_temp');
 if (!fs.existsSync(tempDir)) {
-  fs.mkdirSync(tempDir, { recursive: true });
+  try {
+    fs.mkdirSync(tempDir, { recursive: true });
+  } catch (e) {
+    console.warn('Temp dir create warning:', e);
+  }
 }
 
-const ytdlpPath = path.join(__dirname, 'bin', 'yt-dlp.exe');
-const denoPath = path.join(__dirname, 'bin', 'deno.exe');
+// Cross-platform yt-dlp resolver (Windows local vs Linux Vercel/Render)
+let ytDlpDownloadPromise = null;
+async function getYtDlpPath() {
+  if (isWindows) {
+    const localExe = path.join(__dirname, 'bin', 'yt-dlp.exe');
+    if (fs.existsSync(localExe)) return localExe;
+    return 'yt-dlp';
+  }
+
+  // Linux / Vercel Serverless environment
+  const linuxBin = path.join(os.tmpdir(), 'yt-dlp');
+  if (fs.existsSync(linuxBin)) {
+    try {
+      const stats = fs.statSync(linuxBin);
+      if (stats.size > 2000000) {
+        return linuxBin;
+      }
+    } catch (e) {}
+  }
+
+  if (ytDlpDownloadPromise) {
+    return ytDlpDownloadPromise;
+  }
+
+  ytDlpDownloadPromise = new Promise((resolve, reject) => {
+    console.log('[INIT] Downloading Linux yt-dlp standalone binary...');
+    const file = fs.createWriteStream(linuxBin);
+
+    const download = (url) => {
+      https.get(url, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return download(res.headers.location);
+        }
+        if (res.statusCode !== 200) {
+          return reject(new Error(`Failed to download yt-dlp binary: HTTP ${res.statusCode}`));
+        }
+        res.pipe(file);
+        file.on('finish', () => {
+          file.close();
+          try {
+            fs.chmodSync(linuxBin, 0o755);
+          } catch (e) {}
+          console.log('[INIT] yt-dlp standalone binary ready.');
+          resolve(linuxBin);
+        });
+      }).on('error', (err) => {
+        fs.unlink(linuxBin, () => {});
+        reject(err);
+      });
+    };
+
+    download('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp');
+  });
+
+  return ytDlpDownloadPromise;
+}
+
+function getYtDlpArgs(extraArgs = []) {
+  const args = [
+    '--no-playlist',
+    '--no-warnings',
+    '--no-check-certificates',
+    '--retries', '5'
+  ];
+
+  if (isWindows) {
+    const denoPath = path.join(__dirname, 'bin', 'deno.exe');
+    if (fs.existsSync(denoPath)) {
+      args.push('--js-runtimes', `deno:${denoPath}`, '--remote-components', 'ejs:github');
+    }
+  }
+
+  return [...args, ...extraArgs];
+}
 
 app.use(cors());
 app.use(express.json());
@@ -27,7 +106,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Progress tracking clients (SSE)
 const progressClients = new Map();
 
-// Helper: Format duration seconds to HH:MM:SS
 function formatDuration(seconds) {
   if (!seconds || isNaN(seconds)) return '00:00';
   const hrs = Math.floor(seconds / 3600);
@@ -39,13 +117,11 @@ function formatDuration(seconds) {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-// Helper: Format number with commas
 function formatNumber(num) {
   if (!num) return '0';
   return Number(num).toLocaleString();
 }
 
-// Helper: Sanitize filename for safe Content-Disposition
 function sanitizeFilename(filename) {
   return filename.replace(/[/\\?%*:|"<>]/g, '_').trim();
 }
@@ -60,8 +136,6 @@ app.get('/api/progress/:id', (req, res) => {
   res.flushHeaders?.();
 
   progressClients.set(id, res);
-
-  // Send initial connected state
   res.write(`data: ${JSON.stringify({ status: 'connected', percent: 0 })}\n\n`);
 
   req.on('close', () => {
@@ -82,347 +156,280 @@ function sendProgress(id, data) {
 
 // Video Info Endpoint
 app.post('/api/info', async (req, res) => {
-  const { url } = req.body;
+  try {
+    const { url } = req.body;
 
-  if (!url || typeof url !== 'string') {
-    return res.status(400).json({ error: '유효한 영상 URL을 입력해주세요.' });
-  }
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ error: '유효한 영상 URL을 입력해주세요.' });
+    }
 
-  const cleanUrl = url.trim();
-  // Support YouTube, TikTok, Instagram, X/Twitter, Facebook, etc.
-  const isSupported = /^https?:\/\/.+/i.test(cleanUrl);
-  if (!isSupported) {
-    return res.status(400).json({ error: '올바른 영상 주소(http/https)를 입력해주세요.' });
-  }
+    const cleanUrl = url.trim();
+    const isSupported = /^https?:\/\/.+/i.test(cleanUrl);
+    if (!isSupported) {
+      return res.status(400).json({ error: '올바른 영상 주소(http/https)를 입력해주세요.' });
+    }
 
-  console.log(`[INFO] Fetching metadata for: ${cleanUrl}`);
+    console.log(`[INFO] Fetching metadata for: ${cleanUrl}`);
 
-  const args = [
-    '--dump-single-json',
-    '--no-playlist',
-    '--no-warnings',
-    '--no-check-certificates',
-    '--js-runtimes', `deno:${denoPath}`,
-    '--remote-components', 'ejs:github',
-    '--retries', '10',
-    url.trim()
-  ];
+    const binPath = await getYtDlpPath();
+    const args = getYtDlpArgs(['--dump-single-json', cleanUrl]);
 
-  const ytdlp = spawn(ytdlpPath, args);
-  let stdoutData = '';
-  let stderrData = '';
+    const ytdlp = spawn(binPath, args);
+    let stdoutData = '';
+    let stderrData = '';
 
-  ytdlp.stdout.on('data', (chunk) => {
-    stdoutData += chunk.toString();
-  });
+    ytdlp.stdout.on('data', (chunk) => {
+      stdoutData += chunk.toString();
+    });
 
-  ytdlp.stderr.on('data', (chunk) => {
-    stderrData += chunk.toString();
-  });
+    ytdlp.stderr.on('data', (chunk) => {
+      stderrData += chunk.toString();
+    });
 
-  ytdlp.on('close', (code) => {
-    if (code !== 0) {
-      console.error(`[ERROR] yt-dlp info failed: ${stderrData}`);
+    ytdlp.on('error', (err) => {
+      console.error('[SPAWN ERROR]', err);
       return res.status(500).json({
-        error: '영상 정보를 가져오지 못했습니다. 비공개 영상이거나 연령 제한 영상일 수 있습니다.',
-        details: stderrData
+        error: '영상 추출 엔진 실행에 실패했습니다.',
+        details: err.message
       });
-    }
+    });
 
-    try {
-      const data = JSON.parse(stdoutData);
-
-      // Extract best thumbnail
-      let thumbnail = data.thumbnail;
-      if (Array.isArray(data.thumbnails) && data.thumbnails.length > 0) {
-        const sorted = [...data.thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0));
-        thumbnail = sorted[0]?.url || thumbnail;
-      }
-
-      // Collect available resolutions
-      const heights = new Set();
-      if (Array.isArray(data.formats)) {
-        data.formats.forEach((f) => {
-          if (f.height && f.vcodec && f.vcodec !== 'none') {
-            heights.add(f.height);
-          }
+    ytdlp.on('close', (code) => {
+      if (code !== 0) {
+        console.error(`[ERROR] yt-dlp info failed (code ${code}): ${stderrData}`);
+        return res.status(500).json({
+          error: '영상 정보를 가져오지 못했습니다. 비공개 영상이거나 연령 제한 영상일 수 있습니다.',
+          details: stderrData
         });
       }
 
-      const availableResolutions = Array.from(heights).sort((a, b) => b - a);
+      try {
+        const data = JSON.parse(stdoutData);
 
-      // Parse direct streams
-      const directStreams = [];
-      if (Array.isArray(data.formats)) {
-        data.formats.forEach((f) => {
-          if (f.url) {
-            const hasVideo = f.vcodec && f.vcodec !== 'none';
-            const hasAudio = f.acodec && f.acodec !== 'none';
-            let type = 'unknown';
-            if (hasVideo && hasAudio) type = 'video_with_audio';
-            else if (hasVideo && !hasAudio) type = 'video_only';
-            else if (!hasVideo && hasAudio) type = 'audio_only';
+        let thumbnail = data.thumbnail;
+        if (Array.isArray(data.thumbnails) && data.thumbnails.length > 0) {
+          const sorted = [...data.thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0));
+          thumbnail = sorted[0]?.url || thumbnail;
+        }
 
-            directStreams.push({
-              format_id: f.format_id,
-              ext: f.ext,
-              resolution: f.resolution || (f.height ? `${f.height}p` : 'audio'),
-              height: f.height || 0,
-              filesize: f.filesize || f.filesize_approx || 0,
-              format_note: f.format_note || '',
-              vcodec: f.vcodec,
-              acodec: f.acodec,
-              type: type,
-              url: f.url
-            });
-          }
-        });
+        const heights = new Set();
+        if (Array.isArray(data.formats)) {
+          data.formats.forEach((f) => {
+            if (f.height && f.vcodec && f.vcodec !== 'none') {
+              heights.add(f.height);
+            }
+          });
+        }
+
+        const availableResolutions = Array.from(heights).sort((a, b) => b - a);
+
+        const directStreams = [];
+        if (Array.isArray(data.formats)) {
+          data.formats.forEach((f) => {
+            if (f.url) {
+              const hasVideo = f.vcodec && f.vcodec !== 'none';
+              const hasAudio = f.acodec && f.acodec !== 'none';
+              let type = 'unknown';
+              if (hasVideo && hasAudio) type = 'video_with_audio';
+              else if (hasVideo && !hasAudio) type = 'video_only';
+              else if (!hasVideo && hasAudio) type = 'audio_only';
+
+              directStreams.push({
+                format_id: f.format_id,
+                ext: f.ext,
+                resolution: f.resolution || (f.height ? `${f.height}p` : 'audio'),
+                height: f.height || 0,
+                filesize: f.filesize || f.filesize_approx || 0,
+                format_note: f.format_note || '',
+                vcodec: f.vcodec,
+                acodec: f.acodec,
+                type: type,
+                url: f.url
+              });
+            }
+          });
+        }
+
+        const responsePayload = {
+          id: data.id,
+          title: data.title,
+          uploader: data.uploader || data.channel || 'Video Creator',
+          uploader_url: data.uploader_url || data.channel_url || '',
+          duration: data.duration,
+          duration_formatted: formatDuration(data.duration),
+          view_count: formatNumber(data.view_count),
+          upload_date: data.upload_date ? `${data.upload_date.slice(0, 4)}-${data.upload_date.slice(4, 6)}-${data.upload_date.slice(6, 8)}` : '',
+          thumbnail: thumbnail,
+          description: data.description ? data.description.slice(0, 200) + (data.description.length > 200 ? '...' : '') : '',
+          is_short: data.duration && data.duration <= 60,
+          resolutions: availableResolutions.length > 0 ? availableResolutions : [1080, 720, 480, 360],
+          direct_streams: directStreams
+        };
+
+        res.json(responsePayload);
+      } catch (err) {
+        console.error('[ERROR] JSON parse failed:', err);
+        res.status(500).json({ error: '영상 데이터 해석에 실패했습니다.' });
       }
-
-      const responsePayload = {
-        id: data.id,
-        title: data.title,
-        uploader: data.uploader || data.channel || 'YouTube Creator',
-        uploader_url: data.uploader_url || data.channel_url || '',
-        duration: data.duration,
-        duration_formatted: formatDuration(data.duration),
-        view_count: formatNumber(data.view_count),
-        upload_date: data.upload_date ? `${data.upload_date.slice(0, 4)}-${data.upload_date.slice(4, 6)}-${data.upload_date.slice(6, 8)}` : '',
-        thumbnail: thumbnail,
-        description: data.description ? data.description.slice(0, 200) + (data.description.length > 200 ? '...' : '') : '',
-        is_short: data.duration && data.duration <= 60,
-        resolutions: availableResolutions.length > 0 ? availableResolutions : [1080, 720, 480, 360],
-        direct_streams: directStreams
-      };
-
-      res.json(responsePayload);
-    } catch (err) {
-      console.error('[ERROR] JSON parse failed:', err);
-      res.status(500).json({ error: '영상 데이터 해석에 실패했습니다.' });
-    }
-  });
+    });
+  } catch (err) {
+    console.error('[API FATAL ERROR]', err);
+    res.status(500).json({ error: '서버 내부 오류가 발생했습니다.', details: err.message });
+  }
 });
 
 // Direct Download Endpoint (Zero Server Traffic 302 Redirect)
 app.get('/api/direct-download', async (req, res) => {
-  const { url, format_id, stream_url } = req.query;
+  try {
+    const { url, format_id, stream_url } = req.query;
 
-  if (stream_url) {
-    return res.redirect(302, stream_url);
-  }
-
-  if (!url) {
-    return res.status(400).send('URL이 필요합니다.');
-  }
-
-  const args = [
-    '--no-playlist',
-    '--no-warnings',
-    '--no-check-certificates',
-    '--js-runtimes', `deno:${denoPath}`,
-    '--remote-components', 'ejs:github',
-    '-g'
-  ];
-
-  if (format_id) {
-    args.push('-f', format_id);
-  }
-
-  args.push(url);
-
-  const ytdlp = spawn(ytdlpPath, args);
-  let stdoutData = '';
-
-  ytdlp.stdout.on('data', (chunk) => {
-    stdoutData += chunk.toString();
-  });
-
-  ytdlp.on('close', (code) => {
-    if (code !== 0 || !stdoutData.trim()) {
-      return res.status(500).send('다이렉트 다운로드 주소를 추출하지 못했습니다.');
+    if (stream_url) {
+      return res.redirect(302, stream_url);
     }
 
-    const streamUrl = stdoutData.trim().split('\n')[0].trim();
-    res.redirect(302, streamUrl);
-  });
+    if (!url) {
+      return res.status(400).send('URL이 필요합니다.');
+    }
+
+    const binPath = await getYtDlpPath();
+    const args = getYtDlpArgs(['-g']);
+
+    if (format_id) {
+      args.push('-f', format_id);
+    }
+
+    args.push(url);
+
+    const ytdlp = spawn(binPath, args);
+    let stdoutData = '';
+
+    ytdlp.stdout.on('data', (chunk) => {
+      stdoutData += chunk.toString();
+    });
+
+    ytdlp.on('close', (code) => {
+      if (code !== 0 || !stdoutData.trim()) {
+        return res.status(500).send('다이렉트 다운로드 주소를 추출하지 못했습니다.');
+      }
+
+      const directStreamUrl = stdoutData.trim().split('\n')[0].trim();
+      res.redirect(302, directStreamUrl);
+    });
+  } catch (err) {
+    res.status(500).send('다이렉트 다운로드 처리 중 오류가 발생했습니다.');
+  }
 });
 
-// Download & Stream Endpoint
+// Download & Stream Endpoint (Server side merge)
 app.get('/api/download', async (req, res) => {
-  const { url, type = 'video', quality = 'best', downloadId } = req.query;
+  try {
+    const { url, type = 'video', quality = '1080p', downloadId, title } = req.query;
 
-  if (!url) {
-    return res.status(400).send('URL이 누락되었습니다.');
-  }
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
 
-  const timestamp = Date.now();
-  const filePrefix = `yt_${timestamp}_${Math.random().toString(36).substring(2, 8)}`;
-  let outputTemplate = path.join(tempDir, `${filePrefix}.%(ext)s`);
+    const binPath = await getYtDlpPath();
+    const safeTitle = sanitizeFilename(title || 'download');
+    const timestamp = Date.now();
+    const outputFilename = type === 'audio' ? `${safeTitle}_${timestamp}.mp3` : `${safeTitle}_${timestamp}.mp4`;
+    const outputPath = path.join(tempDir, outputFilename);
 
-  let args = [
-    '--no-playlist',
-    '--no-warnings',
-    '--no-check-certificates',
-    '--js-runtimes', `deno:${denoPath}`,
-    '--remote-components', 'ejs:github',
-    '--retries', '10',
-    '--fragment-retries', '10',
-    '--newline'
-  ];
+    console.log(`[DOWNLOAD] Starting download for: ${url} (type: ${type}, quality: ${quality})`);
 
-  let targetExt = 'mp4';
+    const args = getYtDlpArgs([
+      '--newline',
+      '--progress',
+      '-o', outputPath
+    ]);
 
-  if (type === 'audio') {
-    targetExt = quality === 'm4a' ? 'm4a' : 'mp3';
-    args.push('-x');
-    if (quality === 'm4a') {
-      args.push('--audio-format', 'm4a');
+    if (type === 'audio') {
+      args.push('-x', '--audio-format', 'mp3', '--audio-quality', quality === '320k' ? '0' : '2');
     } else {
-      args.push('--audio-format', 'mp3');
-      const bitrate = quality === '320k' ? '320k' : quality === '192k' ? '192k' : '128k';
-      args.push('--audio-quality', bitrate);
-    }
-    args.push('-o', outputTemplate);
-    args.push(url);
-  } else {
-    // Video mode
-    targetExt = 'mp4';
-    let formatSpec = 'bestvideo[vcodec^=vp9]+bestaudio/bestvideo[vcodec^=avc]+bestaudio/bestvideo+bestaudio/best';
-
-    if (quality === '1080p') {
-      formatSpec = 'bestvideo[height<=1080][vcodec^=vp9]+bestaudio/bestvideo[height<=1080][vcodec^=avc]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best';
-    } else if (quality === '720p') {
-      formatSpec = 'bestvideo[height<=720][vcodec^=vp9]+bestaudio/bestvideo[height<=720][vcodec^=avc]+bestaudio/bestvideo[height<=720]+bestaudio/best[height<=720]/best';
-    } else if (quality === '480p') {
-      formatSpec = 'bestvideo[height<=480][vcodec^=vp9]+bestaudio/bestvideo[height<=480][vcodec^=avc]+bestaudio/bestvideo[height<=480]+bestaudio/best[height<=480]/best';
-    } else if (quality === '360p') {
-      formatSpec = 'bestvideo[height<=360][vcodec^=vp9]+bestaudio/bestvideo[height<=360][vcodec^=avc]+bestaudio/bestvideo[height<=360]+bestaudio/best[height<=360]/18/best';
-    } else if (quality === '4k' || quality === '2160p') {
-      formatSpec = 'bestvideo[height<=2160][vcodec^=vp9]+bestaudio/bestvideo[height<=2160][vcodec^=avc]+bestaudio/bestvideo[height<=2160]+bestaudio/best[height<=2160]/best';
+      const height = parseInt(quality.replace('p', '')) || 1080;
+      args.push('-f', `bestvideo[height<=${height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${height}]+bestaudio/best[height<=${height}]/best`, '--merge-output-format', 'mp4');
     }
 
-    args.push('-f', formatSpec);
-    args.push('--merge-output-format', 'mp4');
-    args.push('-o', outputTemplate);
     args.push(url);
-  }
 
-  console.log(`[DOWNLOAD] Started: type=${type}, quality=${quality}, url=${url}`);
+    const ytdlp = spawn(binPath, args);
 
-  if (downloadId) {
-    sendProgress(downloadId, { status: 'starting', percent: 5, message: '다운로드 준비 중...' });
-  }
+    ytdlp.stdout.on('data', (chunk) => {
+      const text = chunk.toString();
+      const progressMatch = text.match(/\[download\]\s+(\d+\.?\d*)%/);
+      if (progressMatch && downloadId) {
+        const percent = parseFloat(progressMatch[1]);
+        const speedMatch = text.match(/at\s+([^\s]+)/);
+        const etaMatch = text.match(/ETA\s+([^\s]+)/);
+        const sizeMatch = text.match(/of\s+([^\s]+)/);
 
-  const ytdlp = spawn(ytdlpPath, args);
-  let errorOutput = '';
-
-  ytdlp.stdout.on('data', (chunk) => {
-    const text = chunk.toString();
-    console.log(`[yt-dlp stdout]: ${text.trim()}`);
-
-    if (downloadId) {
-      // Parse progress: [download]  45.2% of ~12.50MiB at 4.21MiB/s ETA 00:01
-      const progressMatch = text.match(/\[download\]\s+([\d\.]+)%\s+of\s+~?([^\s]+)\s+at\s+([^\s]+)\s+ETA\s+([^\s]+)/);
-      if (progressMatch) {
-        const percent = Math.min(95, parseFloat(progressMatch[1]));
-        const size = progressMatch[2];
-        const speed = progressMatch[3];
-        const eta = progressMatch[4];
         sendProgress(downloadId, {
           status: 'downloading',
           percent: percent,
-          speed: speed,
-          size: size,
-          eta: eta,
-          message: `스트림 다운로드 중... (${percent.toFixed(1)}% / ${speed})`
-        });
-      } else if (text.includes('[Merger]') || text.includes('Merging formats')) {
-        sendProgress(downloadId, {
-          status: 'converting',
-          percent: 96,
-          message: '고화질 영상과 오디오 합성 중 (FFmpeg)...'
-        });
-      } else if (text.includes('[ExtractAudio]') || text.includes('Destination:')) {
-        sendProgress(downloadId, {
-          status: 'converting',
-          percent: 96,
-          message: '고음질 오디오 변환 중 (FFmpeg)...'
+          speed: speedMatch ? speedMatch[1] : '',
+          eta: etaMatch ? etaMatch[1] : '',
+          size: sizeMatch ? sizeMatch[1] : '',
+          message: `다운로드 중 (${percent}%)`
         });
       }
-    }
-  });
+    });
 
-  ytdlp.stderr.on('data', (chunk) => {
-    errorOutput += chunk.toString();
-  });
-
-  ytdlp.on('close', async (code) => {
-    if (code !== 0) {
-      console.error(`[ERROR] yt-dlp download failed: ${errorOutput}`);
-      if (downloadId) {
-        sendProgress(downloadId, { status: 'error', message: '다운로드 중 오류가 발생했습니다.' });
-      }
-      return res.status(500).send(`다운로드 실패: ${errorOutput}`);
-    }
-
-    if (downloadId) {
-      sendProgress(downloadId, { status: 'finalizing', percent: 99, message: '파일 전송 준비 완료!' });
-    }
-
-    // Find generated file in temp directory matching filePrefix
-    try {
-      const files = fs.readdirSync(tempDir);
-      const targetFile = files.find((f) => f.startsWith(filePrefix));
-
-      if (!targetFile) {
+    ytdlp.on('close', (code) => {
+      if (code !== 0) {
         if (downloadId) {
-          sendProgress(downloadId, { status: 'error', message: '생성된 파일을 찾을 수 없습니다.' });
+          sendProgress(downloadId, { status: 'error', message: '다운로드에 실패했습니다.' });
         }
-        return res.status(500).send('파일 처리 실패: 생성된 파일을 찾을 수 없습니다.');
+        if (!res.headersSent) {
+          return res.status(500).json({ error: '다운로드 실패' });
+        }
+        return;
       }
 
-      const filePath = path.join(tempDir, targetFile);
-      const stats = fs.statSync(filePath);
+      let finalFilePath = outputPath;
+      if (!fs.existsSync(finalFilePath)) {
+        const baseWithoutExt = outputPath.replace(/\.[^/.]+$/, '');
+        const files = fs.readdirSync(tempDir);
+        const matched = files.find((f) => path.join(tempDir, f).startsWith(baseWithoutExt));
+        if (matched) {
+          finalFilePath = path.join(tempDir, matched);
+        }
+      }
 
-      // Get video title if possible via query or fallback
-      const rawTitle = req.query.title ? decodeURIComponent(req.query.title) : 'youtube_download';
-      const safeFilename = `${sanitizeFilename(rawTitle)}.${targetExt}`;
-
-      res.setHeader('Content-Length', stats.size);
-      res.setHeader('Content-Type', type === 'audio' ? 'audio/mpeg' : 'video/mp4');
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="${encodeURIComponent(safeFilename)}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`
-      );
-
-      const fileStream = fs.createReadStream(filePath);
-      fileStream.pipe(res);
+      if (!fs.existsSync(finalFilePath)) {
+        if (downloadId) sendProgress(downloadId, { status: 'error', message: '파일을 찾을 수 없습니다.' });
+        if (!res.headersSent) return res.status(500).json({ error: '파일 생성 실패' });
+        return;
+      }
 
       if (downloadId) {
-        sendProgress(downloadId, { status: 'completed', percent: 100, message: '다운로드 완료!' });
+        sendProgress(downloadId, { status: 'completed', percent: 100, message: '완료!' });
       }
 
-      // Cleanup temp file after response ends
-      res.on('finish', () => {
+      const stat = fs.statSync(finalFilePath);
+      const downloadName = type === 'audio' ? `${safeTitle}.mp3` : `${safeTitle}.mp4`;
+
+      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(downloadName)}`);
+      res.setHeader('Content-Type', type === 'audio' ? 'audio/mpeg' : 'video/mp4');
+      res.setHeader('Content-Length', stat.size);
+
+      const stream = fs.createReadStream(finalFilePath);
+      stream.pipe(res);
+
+      stream.on('end', () => {
         setTimeout(() => {
           try {
-            if (fs.existsSync(filePath)) {
-              fs.unlinkSync(filePath);
-              console.log(`[CLEANUP] Deleted temp file: ${filePath}`);
-            }
-          } catch (e) {
-            console.error('[CLEANUP ERROR]', e);
-          }
-        }, 5000);
+            if (fs.existsSync(finalFilePath)) fs.unlinkSync(finalFilePath);
+          } catch (e) {}
+        }, 10000);
       });
-    } catch (err) {
-      console.error('[ERROR] File streaming failed:', err);
-      res.status(500).send('파일 전송 중 오류 발생');
-    }
-  });
+    });
+  } catch (err) {
+    console.error('[DOWNLOAD FATAL]', err);
+    if (!res.headersSent) res.status(500).json({ error: '서버 오류' });
+  }
 });
 
-// Auto-clean old temp files every 15 minutes
+// Periodic cleanup of temporary files
 setInterval(() => {
   try {
     const files = fs.readdirSync(tempDir);
@@ -430,21 +437,20 @@ setInterval(() => {
     files.forEach((file) => {
       const filePath = path.join(tempDir, file);
       const stats = fs.statSync(filePath);
-      // Older than 20 minutes
       if (now - stats.mtimeMs > 20 * 60 * 1000) {
         fs.unlinkSync(filePath);
       }
     });
-  } catch (err) {
-    console.error('Periodic cleanup error:', err);
-  }
+  } catch (err) {}
 }, 15 * 60 * 1000);
 
-app.listen(PORT, () => {
-  console.log(`====================================================`);
-  console.log(`🚀 YouTube Downloader Server running!`);
-  console.log(`👉 Web Interface: http://localhost:${PORT}`);
-  console.log(`====================================================`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`====================================================`);
+    console.log(`🚀 TubeFetch Server running on port ${PORT}`);
+    console.log(`👉 Web Interface: http://localhost:${PORT}`);
+    console.log(`====================================================`);
+  });
+}
 
 export default app;

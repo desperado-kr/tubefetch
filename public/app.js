@@ -228,7 +228,13 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify({ url })
       });
 
-      const data = await res.json();
+      let data;
+      const text = await res.text();
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error('서버 응답을 처리할 수 없습니다. 잠시 후 다시 시도해주세요.');
+      }
 
       if (!res.ok) {
         throw new Error(data.error || t('error_desc'));
