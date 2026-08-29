@@ -1,10 +1,13 @@
 import { translations } from './i18n.js';
-import { 
-  ADS_CONFIG, 
-  renderTopBanner, 
-  renderResultBanner, 
-  renderAdGateContent, 
-  renderFloatingBanner 
+import { fetchOembedFallback } from './oembed.js';
+import {
+  ADS_CONFIG,
+  renderTopBanner,
+  renderResultBanner,
+  renderAdGateContent,
+  renderFloatingBanner,
+  getAdGateDirectLink,
+  initOptionalAdScripts
 } from './ads-config.js';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -64,30 +67,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // State
   let currentVideoData = null;
+  // The URL that actually produced currentVideoData. Downloads must use this,
+  // not the live input value - the user may have pasted something else since.
+  let currentSourceUrl = null;
   let currentEventSource = null;
   let currentLang = localStorage.getItem('tubefetch_lang') || 'ko';
   let currentTheme = localStorage.getItem('tubefetch_theme') || 'dark';
   let countdownTimer = null;
   let activeAdFinishCallback = null;
+  // Remembered so a language switch can re-localize a visible error instead of
+  // replacing the specific message with the generic placeholder.
+  let currentErrorState = null;
 
   // Dynamic Backend Routing (Connects Vercel frontend to Render backend)
-  const isLocalOrDirect = window.location.hostname === 'localhost' || 
-                          window.location.hostname === '127.0.0.1' || 
-                          window.location.hostname.includes('onrender.com');
+  const { hostname } = window.location;
+  const isLocalOrDirect = hostname === 'localhost' ||
+                          hostname === '127.0.0.1' ||
+                          hostname === 'tubefetch-0u2r.onrender.com';
   const API_BASE = isLocalOrDirect ? '' : 'https://tubefetch-0u2r.onrender.com';
 
   // 1. Initialize Theme
   applyTheme(currentTheme);
 
-  // 2. Initialize Language
+  // 2. Initialize Language (also performs the first renderAds() pass)
   langSelect.value = currentLang;
   applyLanguage(currentLang);
 
   // 3. Initialize History
   renderHistory();
 
-  // 4. Initialize Ads & Monetization
-  renderAds();
+  // 4. Optional standalone ad scripts (popunder / interstitial)
+  initOptionalAdScripts();
 
   // Theme Toggle Event Listener
   themeToggleBtn.addEventListener('click', () => {
@@ -149,10 +159,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Refresh ads in newly selected language
     renderAds();
 
+    if (currentErrorState && !errorCard.classList.contains('hidden')) {
+      errorTitle.textContent = t(currentErrorState.titleKey);
+    }
+
     // Re-render action cards if video card is open
     if (currentVideoData) {
       renderActionCards(currentVideoData);
-      videoViews.textContent = `${currentVideoData.view_count}${t('views_suffix')}`;
+      videoViews.textContent = formatViews(currentVideoData);
     }
   }
 
@@ -205,13 +219,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Skip Ad Button in Modal
   skipAdBtn.addEventListener('click', () => {
-    if (countdownTimer) clearInterval(countdownTimer);
-    adGateModal.classList.add('hidden');
-    if (typeof activeAdFinishCallback === 'function') {
-      activeAdFinishCallback();
-      activeAdFinishCallback = null;
-    }
+    // Opening the SmartLink here (and not on countdown completion) keeps it
+    // inside a real user gesture, so browsers do not block the popup.
+    const directLink = getAdGateDirectLink();
+    if (directLink) window.open(directLink, '_blank', 'noopener,noreferrer');
+
+    finishAdGate();
   });
+
+  function finishAdGate() {
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    }
+    adGateModal.classList.add('hidden');
+
+    const callback = activeAdFinishCallback;
+    activeAdFinishCallback = null;
+    if (typeof callback === 'function') callback();
+  }
 
   // 5-Second Ad Gate Modal Helper (Rewarded Ad Gate)
   function openAdGateModal(onComplete) {
@@ -234,12 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (timeLeft > 0) {
         countdownNumber.textContent = timeLeft;
       } else {
-        clearInterval(countdownTimer);
-        adGateModal.classList.add('hidden');
-        if (typeof activeAdFinishCallback === 'function') {
-          activeAdFinishCallback();
-          activeAdFinishCallback = null;
-        }
+        finishAdGate();
       }
     }, 1000);
   }
@@ -248,7 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function handleAnalyze() {
     const url = urlInput.value.trim();
     if (!url) {
-      showError(t('error_title'), t('error_desc'));
+      showError('error_title', t('error_desc'));
       return;
     }
 
@@ -266,83 +287,46 @@ document.addEventListener('DOMContentLoaded', () => {
           body: JSON.stringify({ url })
         });
 
-        const text = await res.text();
-        const parsed = JSON.parse(text);
-        if (res.ok) {
-          data = parsed;
-        } else {
-          throw new Error(parsed.error || 'Server error');
-        }
+        const parsed = JSON.parse(await res.text());
+        if (!res.ok) throw new Error(parsed.error || 'Server error');
+        data = parsed;
       } catch (backendErr) {
         console.warn('[BACKEND WARN] Falling back to client-side oEmbed:', backendErr);
-        
-        // Client-side fallback for YouTube via Google oEmbed
-        const isYouTube = /youtu\.?be|youtube\.com/i.test(url);
-        if (isYouTube) {
-          try {
-            const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
-            if (oembedRes.ok) {
-              const oData = await oembedRes.json();
-              const videoIdMatch = url.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([\w-]{11})/);
-              const videoId = videoIdMatch ? videoIdMatch[1] : 'video';
-
-              data = {
-                id: videoId,
-                title: oData.title || 'YouTube Video',
-                uploader: oData.author_name || 'YouTube Creator',
-                uploader_url: oData.author_url || '',
-                duration: 180,
-                duration_formatted: '03:00',
-                view_count: '1,000,000+',
-                upload_date: '',
-                thumbnail: oData.thumbnail_url || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-                description: oData.title || '',
-                is_short: url.includes('/shorts/'),
-                resolutions: [1080, 720, 480, 360],
-                direct_streams: [
-                  {
-                    format_id: '22',
-                    ext: 'mp4',
-                    resolution: '720p HD',
-                    height: 720,
-                    type: 'video_with_audio',
-                    url: url
-                  },
-                  {
-                    format_id: '140',
-                    ext: 'm4a',
-                    resolution: 'M4A Original',
-                    height: 0,
-                    type: 'audio_only',
-                    url: url
-                  }
-                ]
-              };
-            }
-          } catch (oErr) {
-            console.error('Client oEmbed error:', oErr);
-          }
-        }
+        data = await fetchOembedFallback(url);
         if (!data) throw backendErr;
       }
 
       currentVideoData = data;
+      currentSourceUrl = url;
       renderVideoInfo(data);
     } catch (err) {
       console.error('Analyze error:', err);
-      showError(t('error_title'), err.message || t('error_desc'));
+      showError('error_title', err.message || t('error_desc'));
     } finally {
       loadingCard.classList.add('hidden');
       setButtonLoading(false);
     }
   }
 
+  function formatViews(data) {
+    // oEmbed exposes no view count; show a dash rather than a made-up number.
+    if (!data.view_count) return '-';
+    return `${data.view_count}${t('views_suffix')}`;
+  }
+
   function renderVideoInfo(data) {
-    videoThumb.src = data.thumbnail;
-    videoDuration.textContent = data.duration_formatted || '00:00';
+    if (data.thumbnail) {
+      videoThumb.src = data.thumbnail;
+      videoThumb.classList.remove('hidden');
+    } else {
+      videoThumb.removeAttribute('src');
+      videoThumb.classList.add('hidden');
+    }
+
+    videoDuration.textContent = data.duration_formatted || '-';
     videoTitle.textContent = data.title;
     videoAuthor.textContent = data.uploader;
-    videoViews.textContent = `${data.view_count}${t('views_suffix')}`;
+    videoViews.textContent = formatViews(data);
     videoDate.textContent = data.upload_date || 'Media';
 
     if (data.is_short) {
@@ -358,15 +342,61 @@ document.addEventListener('DOMContentLoaded', () => {
     resultSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
+  const DOWNLOAD_ICON_SVG = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="7 10 12 15 17 10"/>
+      <line x1="12" y1="15" x2="12" y2="3"/>
+    </svg>
+  `;
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function buildActionCard(action) {
+    // Built with textContent rather than innerHTML: titles here carry remote
+    // metadata (format labels, resolutions) that must never be parsed as HTML.
+    const card = el('div', `action-card ${action.typeClass}`);
+
+    const left = el('div', 'action-card-left');
+    left.appendChild(el('div', 'action-card-icon', action.icon));
+
+    const textBox = el('div', 'action-card-text');
+    const titleRow = el('div', 'action-card-title-row');
+    titleRow.appendChild(el('span', 'action-card-title', action.title));
+    titleRow.appendChild(el('span', `action-card-badge ${action.badgeClass}`, action.badge));
+    textBox.appendChild(titleRow);
+    textBox.appendChild(el('span', 'action-card-desc', action.desc));
+    left.appendChild(textBox);
+
+    const right = el('div', 'action-card-right');
+    const button = el('button', 'btn-action-download');
+    button.innerHTML = DOWNLOAD_ICON_SVG;
+    button.appendChild(el('span', null, t('btn_download_now')));
+    right.appendChild(button);
+
+    card.appendChild(left);
+    card.appendChild(right);
+    card.addEventListener('click', action.onClick);
+    return card;
+  }
+
   function renderActionCards(data) {
     actionCardList.innerHTML = '';
 
     const maxRes = (data.resolutions && data.resolutions.length > 0) ? data.resolutions[0] : 1080;
     const bestResLabel = maxRes >= 2160 ? '4K Ultra HD' : maxRes >= 1440 ? '2K QHD' : maxRes >= 1080 ? '1080p Full HD' : `${maxRes}p HD`;
 
-    // Find direct video+audio stream (720p or 360p)
-    const directStream = (data.direct_streams || []).find((s) => s.type === 'video_with_audio' || (s.vcodec !== 'none' && s.acodec !== 'none'));
-    const directAudioStream = (data.direct_streams || []).find((s) => s.type === 'audio_only' && s.ext === 'm4a') || (data.direct_streams || []).find((s) => s.type === 'audio_only');
+    const streams = data.direct_streams || [];
+    // Only a signed stream can be replayed through /api/direct-download.
+    const signed = streams.filter((s) => s.url && s.url_sig);
+    const directStream = signed.find((s) => s.type === 'video_with_audio');
+    const directAudioStream = signed.find((s) => s.type === 'audio_only' && s.ext === 'm4a') ||
+                              signed.find((s) => s.type === 'audio_only');
 
     const actions = [
       // 1. Best Quality Video (1080p/4K MP4) -> With 5-Sec Ad Gate
@@ -394,8 +424,8 @@ document.addEventListener('DOMContentLoaded', () => {
         badgeClass: 'direct',
         desc: t('card_direct_video_desc'),
         onClick: () => {
-          if (directStream && directStream.url) {
-            triggerDirectDownload(directStream.url, directStream.resolution, directStream.ext);
+          if (directStream) {
+            triggerDirectDownload(directStream, directStream.resolution);
           } else {
             triggerServerDownload('video', '720p', '720p MP4');
           }
@@ -426,8 +456,8 @@ document.addEventListener('DOMContentLoaded', () => {
         badgeClass: 'audio',
         desc: t('card_m4a_desc'),
         onClick: () => {
-          if (directAudioStream && directAudioStream.url) {
-            triggerDirectDownload(directAudioStream.url, 'M4A', directAudioStream.ext || 'm4a');
+          if (directAudioStream) {
+            triggerDirectDownload(directAudioStream, 'M4A');
           } else {
             triggerServerDownload('audio', 'm4a', 'M4A Original');
           }
@@ -435,47 +465,22 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     ];
 
-    actions.forEach((action) => {
-      const card = document.createElement('div');
-      card.className = `action-card ${action.typeClass}`;
-      card.innerHTML = `
-        <div class="action-card-left">
-          <div class="action-card-icon">${action.icon}</div>
-          <div class="action-card-text">
-            <div class="action-card-title-row">
-              <span class="action-card-title">${action.title}</span>
-              <span class="action-card-badge ${action.badgeClass}">${action.badge}</span>
-            </div>
-            <span class="action-card-desc">${action.desc}</span>
-          </div>
-        </div>
-        <div class="action-card-right">
-          <button class="btn-action-download">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/>
-              <line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-            <span>${t('btn_download_now')}</span>
-          </button>
-        </div>
-      `;
-
-      card.addEventListener('click', action.onClick);
-      actionCardList.appendChild(card);
-    });
+    actions.forEach((action) => actionCardList.appendChild(buildActionCard(action)));
   }
 
   // 1. Direct CDN Download (0 Server Traffic)
-  function triggerDirectDownload(streamUrl, name, ext) {
-    if (!currentVideoData) return;
+  function triggerDirectDownload(stream, label) {
+    if (!currentVideoData || !stream?.url || !stream?.url_sig) return;
 
-    const directUrl = `${API_BASE}/api/direct-download?stream_url=${encodeURIComponent(streamUrl)}&title=${encodeURIComponent(currentVideoData.title)}`;
-    
+    const ext = stream.ext || 'mp4';
+    const directUrl = `${API_BASE}/api/direct-download` +
+      `?stream_url=${encodeURIComponent(stream.url)}` +
+      `&sig=${encodeURIComponent(stream.url_sig)}`;
+
     const link = document.createElement('a');
     link.href = directUrl;
     link.target = '_blank';
-    link.download = `${currentVideoData.title}.${ext}`;
+    link.rel = 'noopener noreferrer';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -485,16 +490,15 @@ document.addEventListener('DOMContentLoaded', () => {
       title: currentVideoData.title,
       thumbnail: currentVideoData.thumbnail,
       type: 'direct',
-      quality: `${name} (${ext.toUpperCase()})`,
+      quality: `${label} (${String(ext).toUpperCase()})`,
       timestamp: Date.now()
     });
   }
 
   // 2. Server Download with SSE Progress
   function triggerServerDownload(type, quality, label) {
-    if (!currentVideoData) return;
+    if (!currentVideoData || !currentSourceUrl) return;
 
-    const url = urlInput.value.trim();
     const downloadId = 'dl_' + Math.random().toString(36).substring(2, 9);
 
     progressModal.classList.remove('hidden');
@@ -545,6 +549,11 @@ document.addEventListener('DOMContentLoaded', () => {
           progressStatusTitle.textContent = '오류 발생';
           progressMessage.textContent = data.message || '다운로드에 실패했습니다.';
           currentEventSource.close();
+          // Leave the failure on screen long enough to read, then clear it -
+          // otherwise the card sits there for the rest of the session.
+          setTimeout(() => {
+            progressModal.classList.add('hidden');
+          }, 6000);
         }
       } catch (e) {
         console.error('SSE JSON error:', e);
@@ -555,8 +564,13 @@ document.addEventListener('DOMContentLoaded', () => {
       console.warn('SSE connection closed:', err);
     };
 
-    const downloadUrl = `${API_BASE}/api/download?url=${encodeURIComponent(url)}&type=${type}&quality=${quality}&downloadId=${downloadId}&title=${encodeURIComponent(currentVideoData.title)}`;
-    
+    const downloadUrl = `${API_BASE}/api/download` +
+      `?url=${encodeURIComponent(currentSourceUrl)}` +
+      `&type=${encodeURIComponent(type)}` +
+      `&quality=${encodeURIComponent(quality)}` +
+      `&downloadId=${encodeURIComponent(downloadId)}` +
+      `&title=${encodeURIComponent(currentVideoData.title || '')}`;
+
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.download = '';
@@ -574,13 +588,17 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function saveToHistory(item) {
-    let history = [];
+  function readHistory() {
     try {
-      history = JSON.parse(localStorage.getItem('tubefetch_history')) || [];
+      const parsed = JSON.parse(localStorage.getItem('tubefetch_history'));
+      return Array.isArray(parsed) ? parsed : [];
     } catch (e) {
-      history = [];
+      return [];
     }
+  }
+
+  function saveToHistory(item) {
+    let history = readHistory();
 
     history = history.filter((h) => h.id !== item.id || h.type !== item.type || h.quality !== item.quality);
     history.unshift(item);
@@ -591,12 +609,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderHistory() {
-    let history = [];
-    try {
-      history = JSON.parse(localStorage.getItem('tubefetch_history')) || [];
-    } catch (e) {
-      history = [];
-    }
+    const history = readHistory();
 
     if (history.length === 0) {
       historySection.classList.add('hidden');
@@ -607,16 +620,27 @@ document.addEventListener('DOMContentLoaded', () => {
     historyList.innerHTML = '';
 
     history.forEach((item) => {
-      const el = document.createElement('div');
-      el.className = 'history-item';
-      el.innerHTML = `
-        <img src="${item.thumbnail}" alt="Thumb" class="history-thumb">
-        <div class="history-info">
-          <div class="history-title" title="${item.title}">${item.title}</div>
-          <div class="history-badge">${item.quality || item.type}</div>
-        </div>
-      `;
-      historyList.appendChild(el);
+      // Video titles are remote, attacker-influenceable text and are persisted
+      // across sessions - building this with innerHTML would make a crafted
+      // title a stored XSS that re-fires on every page load.
+      const row = el('div', 'history-item');
+
+      const thumb = document.createElement('img');
+      thumb.className = 'history-thumb';
+      thumb.alt = 'Thumb';
+      if (typeof item.thumbnail === 'string' && /^https?:\/\//i.test(item.thumbnail)) {
+        thumb.src = item.thumbnail;
+      }
+      row.appendChild(thumb);
+
+      const info = el('div', 'history-info');
+      const title = el('div', 'history-title', item.title || '');
+      title.title = item.title || '';
+      info.appendChild(title);
+      info.appendChild(el('div', 'history-badge', item.quality || item.type || ''));
+      row.appendChild(info);
+
+      historyList.appendChild(row);
     });
   }
 
@@ -632,13 +656,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function showError(title, msg) {
-    errorTitle.textContent = title;
+  function showError(titleKey, msg) {
+    currentErrorState = { titleKey };
+    errorTitle.textContent = t(titleKey);
     errorMsg.textContent = msg;
     errorCard.classList.remove('hidden');
   }
 
   function hideError() {
+    currentErrorState = null;
     errorCard.classList.add('hidden');
   }
 });
