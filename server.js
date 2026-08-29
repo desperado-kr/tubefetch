@@ -192,12 +192,76 @@ async function getYtDlpPath() {
   return ytDlpDownloadPromise;
 }
 
+// Cookies live outside tempDir: the cleanup sweep deletes everything in there,
+// and yt-dlp writes refreshed cookies back to this file, so it must persist and
+// stay writable for the life of the process.
+const secureDir = path.join(os.tmpdir(), 'tubefetch_secure');
+let cookieFilePath = null;
+let cookieFileResolved = false;
+
+/**
+ * Materializes a Netscape cookies.txt from the environment, once per process.
+ *
+ * An authenticated session is the main lever against YouTube's datacenter-IP
+ * bot checks, and it also removes the PO Token requirement for the tv client.
+ * Prefer YTDLP_COOKIES_B64: cookies.txt is tab-delimited, and dashboard env
+ * editors routinely convert tabs to spaces, which yt-dlp then rejects.
+ */
+function getCookieFile() {
+  if (cookieFileResolved) return cookieFilePath;
+  cookieFileResolved = true;
+
+  // A file mounted as a secret takes precedence over anything inline.
+  const mounted = process.env.YTDLP_COOKIES_PATH;
+  if (mounted && fs.existsSync(mounted)) {
+    cookieFilePath = mounted;
+    console.log('[COOKIES] Using mounted cookie file.');
+    return cookieFilePath;
+  }
+
+  let raw = '';
+  try {
+    raw = process.env.YTDLP_COOKIES_B64
+      ? Buffer.from(process.env.YTDLP_COOKIES_B64, 'base64').toString('utf8')
+      : (process.env.YTDLP_COOKIES || '');
+  } catch (e) {
+    console.warn('[COOKIES] YTDLP_COOKIES_B64 is not valid base64; ignoring.');
+    return null;
+  }
+
+  if (!raw.trim()) return null;
+
+  try {
+    fs.mkdirSync(secureDir, { recursive: true });
+    const target = path.join(secureDir, 'cookies.txt');
+    // 0600: this file holds a live Google session.
+    fs.writeFileSync(target, raw.endsWith('\n') ? raw : `${raw}\n`, { mode: 0o600 });
+    cookieFilePath = target;
+    console.log(`[COOKIES] Loaded ${raw.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length} cookie lines.`);
+  } catch (err) {
+    console.warn('[COOKIES] Failed to write cookie file:', err.message);
+  }
+
+  return cookieFilePath;
+}
+
 function getYtDlpArgs(extraArgs = []) {
   const args = [
     '--no-playlist',
     '--no-warnings',
     '--retries', '5'
   ];
+
+  const cookieFile = getCookieFile();
+  if (cookieFile) {
+    args.push('--cookies', cookieFile);
+  }
+
+  // bgutil PO Token provider, when one is reachable. Only the clients that
+  // require a GVS token use it; with cookies the tv client needs none at all.
+  if (process.env.YTDLP_POT_BASE_URL) {
+    args.push('--extractor-args', `youtubepot-bgutilhttp:base_url=${process.env.YTDLP_POT_BASE_URL}`);
+  }
 
   // yt-dlp keeps its own client list current as YouTube changes. Pinning one
   // here rots: the previous 'youtube:player_client=mweb,android_embedded'
@@ -325,6 +389,41 @@ function sendProgress(id, data) {
     }
   }
 }
+
+function probeBinary(command) {
+  return new Promise((resolve) => {
+    const child = spawn(command, ['-version']);
+    child.on('error', () => resolve(false));
+    child.on('close', (code) => resolve(code === 0));
+    child.stdout?.resume();
+    child.stderr?.resume();
+  });
+}
+
+// Diagnostics. Reports whether each piece of configuration is present - never
+// the values themselves, since cookies and the signing secret live here.
+app.get('/api/health', async (req, res) => {
+  const [ffmpeg, ffprobe] = await Promise.all([probeBinary('ffmpeg'), probeBinary('ffprobe')]);
+
+  let ytdlpVersion = null;
+  try {
+    const { stdout, code } = await runYtDlp(['--version']);
+    if (code === 0) ytdlpVersion = stdout.trim();
+  } catch (e) {}
+
+  res.json({
+    ok: true,
+    node: process.version,
+    arch: process.arch,
+    ytdlp_version: ytdlpVersion,
+    ffmpeg,
+    ffprobe,
+    cookies_configured: Boolean(getCookieFile()),
+    pot_provider_configured: Boolean(process.env.YTDLP_POT_BASE_URL),
+    stream_secret_from_env: Boolean(process.env.STREAM_SIGNING_SECRET),
+    extractor_args: process.env.YTDLP_EXTRACTOR_ARGS || null
+  });
+});
 
 // Video Info Endpoint
 app.post('/api/info', async (req, res) => {
