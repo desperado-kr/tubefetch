@@ -445,7 +445,15 @@ app.post('/api/info', async (req, res) => {
 
       console.log('[FALLBACK] Attempting YouTube oEmbed metadata extraction...');
       const fallback = await fetchOembedFallback(cleanUrl);
-      if (fallback) return res.json(fallback);
+      if (fallback) {
+        // Carry the real reason through. A fallback that hides why extraction
+        // failed is how this app kept looking healthy while it was broken - and
+        // the 502 branch below already returns the same stderr.
+        return res.json({
+          ...fallback,
+          extraction_error: String(reason).split('\n').filter((l) => l.trim()).slice(-3).join('\n')
+        });
+      }
 
       return res.status(502).json({
         error: '영상 정보를 가져오지 못했습니다. 비공개 영상이거나 연령 제한 영상일 수 있습니다.',
