@@ -2,6 +2,10 @@
 // TubeFetch Monetization & Ad Network Configuration Manager
 // Supports: Hybrid Mode (Adsterra Banners + Monetag Ad Gate),
 //           Adsterra, Monetag, Google AdSense, and Affiliate CPA
+//
+// 광고 코드를 넣는 곳은 아래 "PASTE ZONE" 세 군데뿐입니다.
+// 값을 비워두면 자동으로 제휴(Affiliate) 배너가 대신 노출되므로,
+// 코드를 넣기 전에도 화면이 비어 보이지 않습니다.
 // =========================================================
 
 export const ADS_CONFIG = {
@@ -15,8 +19,8 @@ export const ADS_CONFIG = {
 
   // Hybrid Mode Settings (Mix & Match best performers)
   hybrid: {
-    bannersProvider: 'adsterra', // Provider for Top, Result, and Floating banners: 'adsterra' | 'affiliate' | 'adsense'
-    adGateProvider: 'monetag'    // Provider for 1080p/4K/320k Download Gate: 'monetag' | 'adsterra' | 'affiliate'
+    bannersProvider: 'adsterra', // Top, Result, Floating banners: 'adsterra' | 'affiliate' | 'adsense'
+    adGateProvider: 'monetag'    // 1080p/4K/320k Download Gate: 'monetag' | 'adsterra' | 'affiliate'
   },
 
   // Ad Gate (Rewarded Interstitial Modal) Settings
@@ -27,55 +31,54 @@ export const ADS_CONFIG = {
     canSkipImmediately: true // Allow user to skip or download after timer
   },
 
-  // 1. Adsterra Configuration (Paste your Adsterra Code snippets here)
+  // -------------------------------------------------------------------------
+  // 1. Adsterra
+  // -------------------------------------------------------------------------
   adsterra: {
-    // Top 728x90 Banner (Adsterra key: a32ecf32dad36eb94fff29440474d54b)
-    topBannerHtml: `
-      <div class="adsterra-banner-wrapper" style="display:flex; justify-content:center; align-items:center; width:100%; min-height:90px; overflow-x:auto;">
-        <script type="text/javascript">
-          atOptions = {
-            'key' : 'a32ecf32dad36eb94fff29440474d54b',
-            'format' : 'iframe',
-            'height' : 90,
-            'width' : 728,
-            'params' : {}
-          };
-        </script>
-        <script type="text/javascript" src="https://www.highrevenueformat.com/a32ecf32dad36eb94fff29440474d54b/invoke.js"></script>
-      </div>
-    `,
-    // Result In-Feed 300x250 or 728x90 Banner
-    resultBannerHtml: `
-      <div class="adsterra-banner-wrapper" style="display:flex; justify-content:center; align-items:center; width:100%; min-height:90px; overflow-x:auto;">
-        <script type="text/javascript">
-          atOptions = {
-            'key' : 'a32ecf32dad36eb94fff29440474d54b',
-            'format' : 'iframe',
-            'height' : 90,
-            'width' : 728,
-            'params' : {}
-          };
-        </script>
-        <script type="text/javascript" src="https://www.highrevenueformat.com/a32ecf32dad36eb94fff29440474d54b/invoke.js"></script>
-      </div>
-    `,
-    // Floating Bottom Banner / Social Bar Script
-    floatingBannerHtml: '',
-    // Direct SmartLink or Popunder Script (Optional)
+    // ▼▼▼ PASTE ZONE 1 - 배너 ▼▼▼
+    // Adsterra 대시보드 > Websites > "+ Add unit" 으로 슬롯을 만든 뒤,
+    // 발급된 32자리 key 문자열만 아래에 넣으면 됩니다. (script 태그 통째로 X)
+    //
+    // ⚠️ 슬롯마다 반드시 별도의 key 를 발급받으세요. 하나의 key 를 두 슬롯에
+    //    재사용하면 Adsterra 의 atOptions 전역이 덮어써져 두 번째 배너가 뜨지 않고,
+    //    중복 impression 으로 집계되어 계정 정지 사유가 됩니다.
+    banners: {
+      top: { key: 'a32ecf32dad36eb94fff29440474d54b', width: 728, height: 90 },
+      result: { key: '', width: 300, height: 250 }
+    },
+
+    // ▼▼▼ PASTE ZONE 2 - 하단 플로팅 / Social Bar ▼▼▼
+    // Adsterra 에서 "Social Bar" 단위를 만들면 invoke.js 스크립트 URL 이 나옵니다.
+    // 그 URL 만 넣으세요. Social Bar 는 스스로 화면 하단에 바를 그리므로,
+    // 값이 채워지면 내장 플로팅 배너는 자동으로 숨겨집니다.
+    socialBarScriptUrl: '',
+
+    // Popunder / Direct SmartLink 스크립트 URL (선택)
     popunderScriptUrl: ''
   },
 
-  // 2. Monetag Configuration (Paste your Monetag Code snippets here)
+  // -------------------------------------------------------------------------
+  // 2. Monetag (1080p / 4K / 320kbps 다운로드 게이트)
+  // -------------------------------------------------------------------------
   monetag: {
-    // 1080p Download Ad Gate Modal HTML / In-Page Push / Interstitial
+    // ▼▼▼ PASTE ZONE 3 - 광고 게이트 ▼▼▼
+    // Interstitial / In-Page Push 코드를 통째로 붙여넣으면 5초 모달 안에 렌더됩니다.
     modalAdHtml: '',
-    // Monetag Direct SmartLink URL (Triggers when user clicks download)
+
+    // Monetag Direct Link (SmartLink) URL.
+    // openDirectLinkOnGate 를 true 로 두면 사용자가 '바로 다운로드 시작' 을 누른
+    // 순간(= 사용자 제스처) 새 탭으로 열립니다. 카운트다운 자동 완료 시에는 열지
+    // 않습니다 - 제스처가 없으면 브라우저가 팝업을 차단하기 때문입니다.
     directLinkUrl: '',
-    // Monetag Vignette / Interstitial Script Tag
-    interstitialScriptTag: ''
+    openDirectLinkOnGate: false,
+
+    // Vignette / Interstitial 스크립트 URL (선택)
+    interstitialScriptUrl: ''
   },
 
-  // 3. Google AdSense Configuration
+  // -------------------------------------------------------------------------
+  // 3. Google AdSense
+  // -------------------------------------------------------------------------
   googleAdSense: {
     publisherId: 'ca-pub-XXXXXXXXXXXXXXXX',
     slots: {
@@ -86,7 +89,9 @@ export const ADS_CONFIG = {
     }
   },
 
-  // 4. High-Converting Affiliate Sponsors (Fallback when custom ad codes are empty)
+  // -------------------------------------------------------------------------
+  // 4. High-Converting Affiliate Sponsors (Fallback when ad codes are empty)
+  // -------------------------------------------------------------------------
   affiliateCampaigns: [
     {
       id: 'nordvpn',
@@ -197,6 +202,33 @@ export function getRandomAffiliateCampaign() {
   return campaigns[randomIndex];
 }
 
+// ---------------------------------------------------------------------------
+// Rendering helpers
+// ---------------------------------------------------------------------------
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function safeHttpUrl(value) {
+  try {
+    const parsed = new URL(String(value), window.location.href);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') ? parsed.toString() : '#';
+  } catch (e) {
+    return '#';
+  }
+}
+
+function pickLocale(dict, lang) {
+  if (!dict) return '';
+  return dict[lang] || dict['en'] || dict['ko'] || '';
+}
+
 /**
  * Execute embedded script tags in dynamically inserted HTML
  */
@@ -211,6 +243,56 @@ function setInnerHTMLWithScripts(element, html) {
     newScript.appendChild(document.createTextNode(oldScript.innerHTML));
     oldScript.parentNode.replaceChild(newScript, oldScript);
   });
+}
+
+// Third-party ad tags must be injected exactly once per slot. The renderers are
+// re-run on every language change (so the affiliate fallbacks can re-localize),
+// and re-injecting an ad network's invoke.js would double-count impressions -
+// which is precisely what gets publisher accounts suspended.
+const liveThirdPartySlots = new WeakSet();
+
+function renderThirdPartyOnce(containerEl, html) {
+  if (liveThirdPartySlots.has(containerEl)) return;
+  liveThirdPartySlots.add(containerEl);
+  setInnerHTMLWithScripts(containerEl, html);
+}
+
+const injectedScriptIds = new Set();
+
+function injectScriptOnce(src, id) {
+  if (injectedScriptIds.has(id) || document.getElementById(id)) return;
+  injectedScriptIds.add(id);
+
+  const script = document.createElement('script');
+  script.id = id;
+  script.async = true;
+  script.src = src;
+  document.body.appendChild(script);
+}
+
+const ADSTERRA_KEY_PATTERN = /^[a-f0-9]{32}$/i;
+
+function buildAdsterraBannerHtml(slot) {
+  if (!slot || !ADSTERRA_KEY_PATTERN.test(String(slot.key || ''))) return null;
+
+  const key = slot.key;
+  const width = Number(slot.width) || 728;
+  const height = Number(slot.height) || 90;
+
+  return `
+    <div class="adsterra-banner-wrapper" style="display:flex; justify-content:center; align-items:center; width:100%; min-height:${height}px; overflow-x:auto;">
+      <script type="text/javascript">
+        atOptions = {
+          'key' : '${key}',
+          'format' : 'iframe',
+          'height' : ${height},
+          'width' : ${width},
+          'params' : {}
+        };
+      </script>
+      <script type="text/javascript" src="https://www.highrevenueformat.com/${key}/invoke.js"></script>
+    </div>
+  `;
 }
 
 function getBannerProvider() {
@@ -228,6 +310,17 @@ function getAdGateProvider() {
 }
 
 /**
+ * Monetag Direct Link, if configured. app.js opens this from the ad gate's
+ * skip button so the popup rides a real user gesture.
+ */
+export function getAdGateDirectLink() {
+  const { directLinkUrl, openDirectLinkOnGate } = ADS_CONFIG.monetag;
+  if (!openDirectLinkOnGate || !directLinkUrl) return null;
+  const safe = safeHttpUrl(directLinkUrl);
+  return safe === '#' ? null : safe;
+}
+
+/**
  * Render Top Leaderboard Banner (728x90 / responsive)
  */
 export function renderTopBanner(containerEl, lang = 'ko') {
@@ -240,29 +333,32 @@ export function renderTopBanner(containerEl, lang = 'ko') {
     return;
   }
 
-  if (provider === 'adsterra' && ADS_CONFIG.adsterra.topBannerHtml) {
-    containerEl.className = 'ad-banner-slot top-banner';
-    setInnerHTMLWithScripts(containerEl, ADS_CONFIG.adsterra.topBannerHtml);
-    return;
+  if (provider === 'adsterra') {
+    const html = buildAdsterraBannerHtml(ADS_CONFIG.adsterra.banners.top);
+    if (html) {
+      containerEl.className = 'ad-banner-slot top-banner';
+      renderThirdPartyOnce(containerEl, html);
+      return;
+    }
   }
 
   // Fallback to high-converting localized affiliate banner
   const campaign = getNextAffiliateCampaign();
-  const title = campaign.title[lang] || campaign.title['en'] || campaign.title['ko'];
-  const cta = campaign.ctaText[lang] || campaign.ctaText['en'] || campaign.ctaText['ko'];
+  const title = pickLocale(campaign.title, lang);
+  const cta = pickLocale(campaign.ctaText, lang);
 
   containerEl.innerHTML = `
     <div class="ad-placeholder top-leaderboard">
       <span class="ad-tag">SPONSORED</span>
       <div class="ad-content-box">
         <div class="ad-brand-group">
-          <span class="ad-logo-icon">${campaign.logoEmoji}</span>
-          <span class="ad-brand">${campaign.brand}</span>
-          <span class="ad-pill-highlight">${campaign.discountBadge}</span>
+          <span class="ad-logo-icon">${escapeHtml(campaign.logoEmoji)}</span>
+          <span class="ad-brand">${escapeHtml(campaign.brand)}</span>
+          <span class="ad-pill-highlight">${escapeHtml(campaign.discountBadge)}</span>
         </div>
-        <span class="ad-headline">${title}</span>
-        <a href="${campaign.ctaUrl}" target="_blank" rel="noopener noreferrer" class="btn-ad-cta" data-campaign-id="${campaign.id}">
-          ${cta} ↗
+        <span class="ad-headline">${escapeHtml(title)}</span>
+        <a href="${escapeHtml(safeHttpUrl(campaign.ctaUrl))}" target="_blank" rel="noopener noreferrer sponsored" class="btn-ad-cta" data-campaign-id="${escapeHtml(campaign.id)}">
+          ${escapeHtml(cta)} ↗
         </a>
       </div>
     </div>
@@ -282,32 +378,35 @@ export function renderResultBanner(containerEl, lang = 'ko') {
     return;
   }
 
-  if (provider === 'adsterra' && ADS_CONFIG.adsterra.resultBannerHtml) {
-    setInnerHTMLWithScripts(containerEl, ADS_CONFIG.adsterra.resultBannerHtml);
-    return;
+  if (provider === 'adsterra') {
+    const html = buildAdsterraBannerHtml(ADS_CONFIG.adsterra.banners.result);
+    if (html) {
+      renderThirdPartyOnce(containerEl, html);
+      return;
+    }
   }
 
   const campaign = getNextAffiliateCampaign();
-  const title = campaign.title[lang] || campaign.title['en'] || campaign.title['ko'];
-  const desc = campaign.desc[lang] || campaign.desc['en'] || campaign.desc['ko'];
-  const cta = campaign.ctaText[lang] || campaign.ctaText['en'] || campaign.ctaText['ko'];
+  const title = pickLocale(campaign.title, lang);
+  const desc = pickLocale(campaign.desc, lang);
+  const cta = pickLocale(campaign.ctaText, lang);
 
   containerEl.innerHTML = `
     <div class="ad-result-card">
       <div class="ad-result-header">
         <div class="ad-sponsor-badge">
           <span class="ad-tag-subtle">SPONSORED</span>
-          <span class="ad-partner-name">${campaign.logoEmoji} ${campaign.brand}</span>
+          <span class="ad-partner-name">${escapeHtml(campaign.logoEmoji)} ${escapeHtml(campaign.brand)}</span>
         </div>
-        <span class="ad-discount-chip">${campaign.discountBadge}</span>
+        <span class="ad-discount-chip">${escapeHtml(campaign.discountBadge)}</span>
       </div>
       <div class="ad-result-body">
         <div class="ad-result-text">
-          <h4 class="ad-result-title">${title}</h4>
-          <p class="ad-result-desc">${desc}</p>
+          <h4 class="ad-result-title">${escapeHtml(title)}</h4>
+          <p class="ad-result-desc">${escapeHtml(desc)}</p>
         </div>
-        <a href="${campaign.ctaUrl}" target="_blank" rel="noopener noreferrer" class="btn-result-cta" data-campaign-id="${campaign.id}">
-          ${cta}
+        <a href="${escapeHtml(safeHttpUrl(campaign.ctaUrl))}" target="_blank" rel="noopener noreferrer sponsored" class="btn-result-cta" data-campaign-id="${escapeHtml(campaign.id)}">
+          ${escapeHtml(cta)}
         </a>
       </div>
     </div>
@@ -328,27 +427,35 @@ export function renderAdGateContent(containerEl, lang = 'ko') {
   }
 
   if (provider === 'monetag' && ADS_CONFIG.monetag.modalAdHtml) {
-    setInnerHTMLWithScripts(containerEl, ADS_CONFIG.monetag.modalAdHtml);
+    renderThirdPartyOnce(containerEl, ADS_CONFIG.monetag.modalAdHtml);
     return;
   }
 
+  if (provider === 'adsterra') {
+    const html = buildAdsterraBannerHtml(ADS_CONFIG.adsterra.banners.result);
+    if (html) {
+      renderThirdPartyOnce(containerEl, html);
+      return;
+    }
+  }
+
   const campaign = getRandomAffiliateCampaign();
-  const title = campaign.title[lang] || campaign.title['en'] || campaign.title['ko'];
-  const desc = campaign.desc[lang] || campaign.desc['en'] || campaign.desc['ko'];
-  const cta = campaign.ctaText[lang] || campaign.ctaText['en'] || campaign.ctaText['ko'];
+  const title = pickLocale(campaign.title, lang);
+  const desc = pickLocale(campaign.desc, lang);
+  const cta = pickLocale(campaign.ctaText, lang);
 
   containerEl.innerHTML = `
     <div class="ad-inner-banner">
       <div class="ad-modal-sponsor-row">
-        <div class="ad-sponsor-pill">${campaign.categoryBadge}</div>
-        <span class="ad-modal-discount-pill">${campaign.discountBadge}</span>
+        <div class="ad-sponsor-pill">${escapeHtml(campaign.categoryBadge)}</div>
+        <span class="ad-modal-discount-pill">${escapeHtml(campaign.discountBadge)}</span>
       </div>
       <div class="ad-sponsor-content">
-        <div class="ad-sponsor-logo">${campaign.logoEmoji} ${campaign.brand}</div>
-        <h4>${title}</h4>
-        <p>${desc}</p>
-        <a href="${campaign.ctaUrl}" target="_blank" rel="noopener noreferrer" class="btn-ad-modal-cta" data-campaign-id="${campaign.id}">
-          ${cta} ↗
+        <div class="ad-sponsor-logo">${escapeHtml(campaign.logoEmoji)} ${escapeHtml(campaign.brand)}</div>
+        <h4>${escapeHtml(title)}</h4>
+        <p>${escapeHtml(desc)}</p>
+        <a href="${escapeHtml(safeHttpUrl(campaign.ctaUrl))}" target="_blank" rel="noopener noreferrer sponsored" class="btn-ad-modal-cta" data-campaign-id="${escapeHtml(campaign.id)}">
+          ${escapeHtml(cta)} ↗
         </a>
       </div>
     </div>
@@ -369,29 +476,32 @@ export function renderFloatingBanner(containerEl, lang = 'ko') {
 
   const provider = getBannerProvider();
 
-  if (provider === 'adsterra' && ADS_CONFIG.adsterra.floatingBannerHtml) {
-    setInnerHTMLWithScripts(containerEl, ADS_CONFIG.adsterra.floatingBannerHtml);
+  // Social Bar draws its own bar directly into <body>, so the built-in slot
+  // stays empty and hidden when it is configured.
+  if (provider === 'adsterra' && ADS_CONFIG.adsterra.socialBarScriptUrl) {
+    injectScriptOnce(safeHttpUrl(ADS_CONFIG.adsterra.socialBarScriptUrl), 'adsterra-social-bar');
+    containerEl.classList.add('hidden');
     return;
   }
 
   const campaign = getRandomAffiliateCampaign();
-  const title = campaign.title[lang] || campaign.title['en'] || campaign.title['ko'];
-  const cta = campaign.ctaText[lang] || campaign.ctaText['en'] || campaign.ctaText['ko'];
+  const title = pickLocale(campaign.title, lang);
+  const cta = pickLocale(campaign.ctaText, lang);
 
   containerEl.innerHTML = `
     <div class="floating-ad-wrapper">
       <div class="floating-ad-content">
         <div class="floating-ad-left">
           <span class="floating-ad-tag">AD</span>
-          <span class="floating-ad-icon">${campaign.logoEmoji}</span>
+          <span class="floating-ad-icon">${escapeHtml(campaign.logoEmoji)}</span>
           <div class="floating-ad-text">
-            <span class="floating-ad-brand">${campaign.brand}</span>
-            <span class="floating-ad-title">${title}</span>
+            <span class="floating-ad-brand">${escapeHtml(campaign.brand)}</span>
+            <span class="floating-ad-title">${escapeHtml(title)}</span>
           </div>
         </div>
         <div class="floating-ad-actions">
-          <a href="${campaign.ctaUrl}" target="_blank" rel="noopener noreferrer" class="btn-floating-cta">
-            ${cta}
+          <a href="${escapeHtml(safeHttpUrl(campaign.ctaUrl))}" target="_blank" rel="noopener noreferrer sponsored" class="btn-floating-cta">
+            ${escapeHtml(cta)}
           </a>
           <button class="btn-floating-close" id="floatingAdCloseBtn" title="광고 닫기">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -414,34 +524,48 @@ export function renderFloatingBanner(containerEl, lang = 'ko') {
   }
 }
 
-function ensureAdSenseScriptLoaded() {
-  const pubId = ADS_CONFIG.googleAdSense.publisherId;
-  if (!pubId || pubId.includes('XXXXX')) return;
+/**
+ * Optional Popunder / SmartLink loader. Called once at startup by app.js.
+ */
+export function initOptionalAdScripts() {
+  const { popunderScriptUrl } = ADS_CONFIG.adsterra;
+  if (getBannerProvider() === 'adsterra' && popunderScriptUrl) {
+    injectScriptOnce(safeHttpUrl(popunderScriptUrl), 'adsterra-popunder');
+  }
 
-  const scriptId = 'google-adsense-script';
-  if (!document.getElementById(scriptId)) {
-    const script = document.createElement('script');
-    script.id = scriptId;
-    script.async = true;
-    script.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${pubId}`;
-    script.crossOrigin = 'anonymous';
-    document.head.appendChild(script);
+  const { interstitialScriptUrl } = ADS_CONFIG.monetag;
+  if (getAdGateProvider() === 'monetag' && interstitialScriptUrl) {
+    injectScriptOnce(safeHttpUrl(interstitialScriptUrl), 'monetag-interstitial');
   }
 }
 
+function ensureAdSenseScriptLoaded() {
+  const pubId = ADS_CONFIG.googleAdSense.publisherId;
+  if (!pubId || pubId.includes('XXXXX')) return false;
+
+  injectScriptOnce(`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(pubId)}`, 'google-adsense-script');
+  return true;
+}
+
 function renderAdSenseBlock(container, slotId, format = 'auto') {
-  ensureAdSenseScriptLoaded();
+  // Without a real publisher ID the script never loads, and pushing onto
+  // window.adsbygoogle just grows an array that nothing ever drains.
+  if (!ensureAdSenseScriptLoaded()) {
+    container.innerHTML = '';
+    return;
+  }
 
   container.innerHTML = `
     <div class="adsense-container" style="text-align:center; overflow:hidden; min-height:90px; width:100%; display:flex; justify-content:center;">
       <ins class="adsbygoogle"
            style="display:block; width:100%;"
-           data-ad-client="${ADS_CONFIG.googleAdSense.publisherId}"
-           data-ad-slot="${slotId}"
-           data-ad-format="${format}"
+           data-ad-client="${escapeHtml(ADS_CONFIG.googleAdSense.publisherId)}"
+           data-ad-slot="${escapeHtml(slotId)}"
+           data-ad-format="${escapeHtml(format)}"
            data-full-width-responsive="true"></ins>
     </div>
   `;
+
   try {
     (window.adsbygoogle = window.adsbygoogle || []).push({});
   } catch (e) {

@@ -155,8 +155,10 @@
           </svg>
         </div>
         <div class="error-content">
-          <h4 id="errorTitle" data-i18n="error_title">영상 정보를 불러올 수 없습니다</h4>
-          <p id="errorMsg" data-i18n="error_desc">올바른 영상 링크인지 확인해주세요.</p>
+          <!-- No data-i18n here: app.js owns this text so a language switch
+               cannot replace a live error message with the generic default. -->
+          <h4 id="errorTitle">영상 정보를 불러올 수 없습니다</h4>
+          <p id="errorMsg">올바른 영상 링크인지 확인해주세요.</p>
         </div>
         <button id="retryBtn" class="btn-outline" data-i18n="retry_btn">다시 시도</button>
       </div>

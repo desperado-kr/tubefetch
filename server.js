@@ -5,7 +5,9 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import https from 'https';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import { fetchOembedFallback } from './public/oembed.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,6 +15,8 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const isWindows = process.platform === 'win32';
+
+const YT_DLP_LINUX_URL = 'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp';
 
 // Ensure temporary working directory
 const tempDir = path.join(os.tmpdir(), 'tubefetch_temp');
@@ -22,6 +26,119 @@ if (!fs.existsSync(tempDir)) {
   } catch (e) {
     console.warn('Temp dir create warning:', e);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Input validation
+// ---------------------------------------------------------------------------
+
+// Every user-supplied value that reaches the yt-dlp argv goes through this.
+// Parsing as a URL rather than a loose regex also guarantees the value cannot
+// begin with "-", which yt-dlp would otherwise read as an option (--update-to
+// can replace the binary itself, --exec runs a shell command) instead of a
+// download target.
+function normalizeMediaUrl(value) {
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch (e) {
+    return null;
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+  return parsed.toString();
+}
+
+const FORMAT_ID_PATTERN = /^[A-Za-z0-9_.+-]{1,64}$/;
+
+function sanitizeFilename(filename) {
+  return String(filename ?? '')
+    // Path separators, Windows-illegal characters, and "%" which yt-dlp would
+    // otherwise interpret as an output-template placeholder.
+    .replace(/[/\\?%*:|"<>]/g, '_')
+    // Control characters: keep them out of filenames and Content-Disposition.
+    .split('').filter((ch) => ch.charCodeAt(0) > 31 && ch.charCodeAt(0) !== 127).join('')
+    .replace(/^\.+/, '')
+    .trim()
+    .slice(0, 120);
+}
+
+// Stream URLs are handed to the browser together with an HMAC, and
+// /api/direct-download only redirects to a URL whose signature it can verify.
+// Without this the endpoint is an open redirect that lends the app's own domain
+// to arbitrary phishing pages. Set STREAM_SIGNING_SECRET in the environment to
+// keep links valid across restarts and across multiple instances.
+const STREAM_SIGNING_SECRET = process.env.STREAM_SIGNING_SECRET || crypto.randomBytes(32).toString('hex');
+
+function signStreamUrl(url) {
+  return crypto.createHmac('sha256', STREAM_SIGNING_SECRET).update(url).digest('base64url');
+}
+
+function verifyStreamSignature(url, signature) {
+  if (typeof signature !== 'string' || !signature) return false;
+  const expected = Buffer.from(signStreamUrl(url), 'utf8');
+  const provided = Buffer.from(signature, 'utf8');
+  return expected.length === provided.length && crypto.timingSafeEqual(expected, provided);
+}
+
+// ---------------------------------------------------------------------------
+// yt-dlp resolution & execution
+// ---------------------------------------------------------------------------
+
+function downloadYtDlpBinary(targetPath) {
+  return new Promise((resolve, reject) => {
+    console.log('[INIT] Downloading Linux yt-dlp standalone binary...');
+    const file = fs.createWriteStream(targetPath);
+    let settled = false;
+
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      file.destroy();
+      // Leave no truncated binary behind: getYtDlpPath() would otherwise adopt
+      // it on the next call as long as it happened to exceed the size check.
+      fs.unlink(targetPath, () => {});
+      reject(err);
+    };
+
+    const request = (url, redirectsLeft) => {
+      https.get(url, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume();
+          if (redirectsLeft <= 0) return fail(new Error('Too many redirects while downloading yt-dlp'));
+          return request(new URL(res.headers.location, url).toString(), redirectsLeft - 1);
+        }
+
+        if (res.statusCode !== 200) {
+          res.resume();
+          return fail(new Error(`Failed to download yt-dlp binary: HTTP ${res.statusCode}`));
+        }
+
+        res.on('error', fail);
+        file.on('error', fail);
+        file.on('finish', () => {
+          if (settled) return;
+          settled = true;
+          file.close(() => {
+            try {
+              fs.chmodSync(targetPath, 0o755);
+            } catch (e) {}
+            console.log('[INIT] yt-dlp standalone binary ready.');
+            resolve(targetPath);
+          });
+        });
+
+        res.pipe(file);
+      }).on('error', fail);
+    };
+
+    request(YT_DLP_LINUX_URL, 5);
+  });
 }
 
 // Cross-platform yt-dlp resolver (Windows local vs Linux Vercel/Render)
@@ -52,39 +169,15 @@ async function getYtDlpPath() {
     } catch (e) {}
   }
 
-  if (ytDlpDownloadPromise) {
-    return ytDlpDownloadPromise;
+  if (!ytDlpDownloadPromise) {
+    ytDlpDownloadPromise = downloadYtDlpBinary(linuxBin);
+    // Caching a rejected promise would make every later request fail forever;
+    // clear it so the next request retries. The original promise is still
+    // returned, so the current caller still sees the rejection.
+    ytDlpDownloadPromise.catch(() => {
+      ytDlpDownloadPromise = null;
+    });
   }
-
-  ytDlpDownloadPromise = new Promise((resolve, reject) => {
-    console.log('[INIT] Downloading Linux yt-dlp standalone binary...');
-    const file = fs.createWriteStream(linuxBin);
-
-    const download = (url) => {
-      https.get(url, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          return download(res.headers.location);
-        }
-        if (res.statusCode !== 200) {
-          return reject(new Error(`Failed to download yt-dlp binary: HTTP ${res.statusCode}`));
-        }
-        res.pipe(file);
-        file.on('finish', () => {
-          file.close();
-          try {
-            fs.chmodSync(linuxBin, 0o755);
-          } catch (e) {}
-          console.log('[INIT] yt-dlp standalone binary ready.');
-          resolve(linuxBin);
-        });
-      }).on('error', (err) => {
-        fs.unlink(linuxBin, () => {});
-        reject(err);
-      });
-    };
-
-    download('https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp');
-  });
 
   return ytDlpDownloadPromise;
 }
@@ -93,10 +186,17 @@ function getYtDlpArgs(extraArgs = []) {
   const args = [
     '--no-playlist',
     '--no-warnings',
-    '--no-check-certificates',
-    '--extractor-args', 'youtube:player_client=mweb,android_embedded;player_skip=webpage,configs',
     '--retries', '5'
   ];
+
+  // yt-dlp keeps its own client list current as YouTube changes. Pinning one
+  // here rots: the previous 'youtube:player_client=mweb,android_embedded'
+  // value made every extraction fail with "Requested format is not available"
+  // once android_embedded was removed upstream. Override via the environment
+  // only when a specific site genuinely needs it.
+  if (process.env.YTDLP_EXTRACTOR_ARGS) {
+    args.push('--extractor-args', process.env.YTDLP_EXTRACTOR_ARGS);
+  }
 
   if (isWindows) {
     const denoPath = path.join(__dirname, 'bin', 'deno.exe');
@@ -108,6 +208,49 @@ function getYtDlpArgs(extraArgs = []) {
   }
 
   return [...args, ...extraArgs];
+}
+
+const MAX_STDERR_CAPTURE = 64 * 1024;
+
+/**
+ * Single place where yt-dlp is spawned. Every call site gets:
+ *  - an 'error' listener, so a missing binary rejects instead of throwing an
+ *    uncaught exception that kills the process;
+ *  - exactly one settlement, so a handler can never respond twice;
+ *  - utf8 stream decoding, so a multi-byte character split across two chunks is
+ *    not mangled into replacement characters.
+ */
+async function runYtDlp(extraArgs, { onStdoutChunk = null, collectStdout = true } = {}) {
+  const binPath = await getYtDlpPath();
+
+  return new Promise((resolve) => {
+    const child = spawn(binPath, getYtDlpArgs(extraArgs));
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+
+    child.stdout.on('data', (chunk) => {
+      if (collectStdout) stdout += chunk;
+      if (onStdoutChunk) onStdoutChunk(chunk);
+    });
+
+    child.stderr.on('data', (chunk) => {
+      if (stderr.length < MAX_STDERR_CAPTURE) stderr += chunk;
+    });
+
+    // Promises ignore a second settlement, so an 'error' followed by 'close'
+    // resolves once with the error.
+    child.on('error', (err) => {
+      console.error('[SPAWN ERROR]', err);
+      resolve({ code: null, stdout, stderr, error: err });
+    });
+
+    child.on('close', (code) => {
+      resolve({ code, stdout, stderr, error: null });
+    });
+  });
 }
 
 app.use(cors({ origin: '*' }));
@@ -133,10 +276,6 @@ function formatNumber(num) {
   return Number(num).toLocaleString();
 }
 
-function sanitizeFilename(filename) {
-  return filename.replace(/[/\\?%*:|"<>]/g, '_').trim();
-}
-
 // SSE Endpoint for download progress
 app.get('/api/progress/:id', (req, res) => {
   const { id } = req.params;
@@ -144,12 +283,24 @@ app.get('/api/progress/:id', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
 
   progressClients.set(id, res);
   res.write(`data: ${JSON.stringify({ status: 'connected', percent: 0 })}\n\n`);
 
+  // Render and most reverse proxies drop connections that stay silent, which
+  // would strand the progress modal on a slow extraction.
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': keep-alive\n\n');
+    } catch (err) {
+      clearInterval(heartbeat);
+    }
+  }, 25000);
+
   req.on('close', () => {
+    clearInterval(heartbeat);
     progressClients.delete(id);
   });
 });
@@ -168,341 +319,340 @@ function sendProgress(id, data) {
 // Video Info Endpoint
 app.post('/api/info', async (req, res) => {
   try {
-    const { url } = req.body;
-
-    if (!url || typeof url !== 'string') {
-      return res.status(400).json({ error: '유효한 영상 URL을 입력해주세요.' });
-    }
-
-    const cleanUrl = url.trim();
-    const isSupported = /^https?:\/\/.+/i.test(cleanUrl);
-    if (!isSupported) {
+    const cleanUrl = normalizeMediaUrl(req.body?.url);
+    if (!cleanUrl) {
       return res.status(400).json({ error: '올바른 영상 주소(http/https)를 입력해주세요.' });
     }
 
     console.log(`[INFO] Fetching metadata for: ${cleanUrl}`);
 
-    const binPath = await getYtDlpPath();
-    const args = getYtDlpArgs(['--dump-single-json', cleanUrl]);
+    const { code, stdout, stderr, error } = await runYtDlp(['--dump-single-json', '--', cleanUrl]);
 
-    const ytdlp = spawn(binPath, args);
-    let stdoutData = '';
-    let stderrData = '';
+    if (error || code !== 0) {
+      const reason = error ? error.message : stderr;
+      console.error(`[ERROR] yt-dlp info failed (code ${code}): ${reason}`);
 
-    ytdlp.stdout.on('data', (chunk) => {
-      stdoutData += chunk.toString();
-    });
+      console.log('[FALLBACK] Attempting YouTube oEmbed metadata extraction...');
+      const fallback = await fetchOembedFallback(cleanUrl);
+      if (fallback) return res.json(fallback);
 
-    ytdlp.stderr.on('data', (chunk) => {
-      stderrData += chunk.toString();
-    });
-
-    ytdlp.on('error', (err) => {
-      console.error('[SPAWN ERROR]', err);
-      return res.status(500).json({
-        error: '영상 추출 엔진 실행에 실패했습니다.',
-        details: err.message
+      return res.status(502).json({
+        error: '영상 정보를 가져오지 못했습니다. 비공개 영상이거나 연령 제한 영상일 수 있습니다.',
+        details: reason
       });
-    });
+    }
 
-    ytdlp.on('close', async (code) => {
-      if (code !== 0) {
-        console.error(`[ERROR] yt-dlp info failed (code ${code}): ${stderrData}`);
+    let data;
+    try {
+      data = JSON.parse(stdout);
+    } catch (parseErr) {
+      console.error('[ERROR] JSON parse failed:', parseErr);
+      return res.status(502).json({ error: '영상 데이터 해석에 실패했습니다.' });
+    }
 
-        // Fallback for YouTube via official Google oEmbed API
-        const isYouTube = /youtu\.?be|youtube\.com/i.test(cleanUrl);
-        if (isYouTube) {
-          try {
-            console.log('[FALLBACK] Attempting YouTube oEmbed metadata extraction...');
-            const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(cleanUrl)}&format=json`);
-            if (oembedRes.ok) {
-              const oData = await oembedRes.json();
-              const videoIdMatch = cleanUrl.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([\w-]{11})/);
-              const videoId = videoIdMatch ? videoIdMatch[1] : 'video';
+    let thumbnail = data.thumbnail;
+    if (Array.isArray(data.thumbnails) && data.thumbnails.length > 0) {
+      const sorted = [...data.thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0));
+      thumbnail = sorted[0]?.url || thumbnail;
+    }
 
-              return res.json({
-                id: videoId,
-                title: oData.title || 'YouTube Video',
-                uploader: oData.author_name || 'YouTube Creator',
-                uploader_url: oData.author_url || '',
-                duration: 180,
-                duration_formatted: '03:00',
-                view_count: '1,000,000+',
-                upload_date: '',
-                thumbnail: oData.thumbnail_url || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-                description: oData.title || '',
-                is_short: cleanUrl.includes('/shorts/'),
-                resolutions: [1080, 720, 480, 360],
-                direct_streams: [
-                  {
-                    format_id: '22',
-                    ext: 'mp4',
-                    resolution: '720p HD',
-                    height: 720,
-                    type: 'video_with_audio',
-                    url: cleanUrl
-                  },
-                  {
-                    format_id: '140',
-                    ext: 'm4a',
-                    resolution: 'M4A Original',
-                    height: 0,
-                    type: 'audio_only',
-                    url: cleanUrl
-                  }
-                ]
-              });
-            }
-          } catch (oErr) {
-            console.error('[FALLBACK ERROR]', oErr);
-          }
+    const heights = new Set();
+    if (Array.isArray(data.formats)) {
+      data.formats.forEach((f) => {
+        if (f.height && f.vcodec && f.vcodec !== 'none') {
+          heights.add(f.height);
         }
+      });
+    }
 
-        return res.status(500).json({
-          error: '영상 정보를 가져오지 못했습니다. 비공개 영상이거나 연령 제한 영상일 수 있습니다.',
-          details: stderrData
+    const availableResolutions = Array.from(heights).sort((a, b) => b - a);
+
+    const directStreams = [];
+    if (Array.isArray(data.formats)) {
+      data.formats.forEach((f) => {
+        const streamUrl = normalizeMediaUrl(f.url);
+        if (!streamUrl) return;
+
+        const hasVideo = f.vcodec && f.vcodec !== 'none';
+        const hasAudio = f.acodec && f.acodec !== 'none';
+        let type = 'unknown';
+        if (hasVideo && hasAudio) type = 'video_with_audio';
+        else if (hasVideo && !hasAudio) type = 'video_only';
+        else if (!hasVideo && hasAudio) type = 'audio_only';
+
+        directStreams.push({
+          format_id: f.format_id,
+          ext: f.ext,
+          resolution: f.resolution || (f.height ? `${f.height}p` : 'audio'),
+          height: f.height || 0,
+          filesize: f.filesize || f.filesize_approx || 0,
+          format_note: f.format_note || '',
+          vcodec: f.vcodec,
+          acodec: f.acodec,
+          type: type,
+          url: streamUrl,
+          // Proves to /api/direct-download that this URL came from us.
+          url_sig: signStreamUrl(streamUrl)
         });
-      }
+      });
+    }
 
-      try {
-        const data = JSON.parse(stdoutData);
-
-        let thumbnail = data.thumbnail;
-        if (Array.isArray(data.thumbnails) && data.thumbnails.length > 0) {
-          const sorted = [...data.thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0));
-          thumbnail = sorted[0]?.url || thumbnail;
-        }
-
-        const heights = new Set();
-        if (Array.isArray(data.formats)) {
-          data.formats.forEach((f) => {
-            if (f.height && f.vcodec && f.vcodec !== 'none') {
-              heights.add(f.height);
-            }
-          });
-        }
-
-        const availableResolutions = Array.from(heights).sort((a, b) => b - a);
-
-        const directStreams = [];
-        if (Array.isArray(data.formats)) {
-          data.formats.forEach((f) => {
-            if (f.url) {
-              const hasVideo = f.vcodec && f.vcodec !== 'none';
-              const hasAudio = f.acodec && f.acodec !== 'none';
-              let type = 'unknown';
-              if (hasVideo && hasAudio) type = 'video_with_audio';
-              else if (hasVideo && !hasAudio) type = 'video_only';
-              else if (!hasVideo && hasAudio) type = 'audio_only';
-
-              directStreams.push({
-                format_id: f.format_id,
-                ext: f.ext,
-                resolution: f.resolution || (f.height ? `${f.height}p` : 'audio'),
-                height: f.height || 0,
-                filesize: f.filesize || f.filesize_approx || 0,
-                format_note: f.format_note || '',
-                vcodec: f.vcodec,
-                acodec: f.acodec,
-                type: type,
-                url: f.url
-              });
-            }
-          });
-        }
-
-        const responsePayload = {
-          id: data.id,
-          title: data.title,
-          uploader: data.uploader || data.channel || 'Video Creator',
-          uploader_url: data.uploader_url || data.channel_url || '',
-          duration: data.duration,
-          duration_formatted: formatDuration(data.duration),
-          view_count: formatNumber(data.view_count),
-          upload_date: data.upload_date ? `${data.upload_date.slice(0, 4)}-${data.upload_date.slice(4, 6)}-${data.upload_date.slice(6, 8)}` : '',
-          thumbnail: thumbnail,
-          description: data.description ? data.description.slice(0, 200) + (data.description.length > 200 ? '...' : '') : '',
-          is_short: data.duration && data.duration <= 60,
-          resolutions: availableResolutions.length > 0 ? availableResolutions : [1080, 720, 480, 360],
-          direct_streams: directStreams
-        };
-
-        res.json(responsePayload);
-      } catch (err) {
-        console.error('[ERROR] JSON parse failed:', err);
-        res.status(500).json({ error: '영상 데이터 해석에 실패했습니다.' });
-      }
+    res.json({
+      id: data.id,
+      title: data.title,
+      uploader: data.uploader || data.channel || 'Video Creator',
+      uploader_url: data.uploader_url || data.channel_url || '',
+      duration: data.duration,
+      duration_formatted: formatDuration(data.duration),
+      view_count: formatNumber(data.view_count),
+      upload_date: data.upload_date ? `${data.upload_date.slice(0, 4)}-${data.upload_date.slice(4, 6)}-${data.upload_date.slice(6, 8)}` : '',
+      thumbnail: thumbnail,
+      description: data.description ? data.description.slice(0, 200) + (data.description.length > 200 ? '...' : '') : '',
+      is_short: Boolean(data.duration && data.duration <= 60),
+      resolutions: availableResolutions.length > 0 ? availableResolutions : [1080, 720, 480, 360],
+      direct_streams: directStreams,
+      limited_metadata: false
     });
   } catch (err) {
     console.error('[API FATAL ERROR]', err);
-    res.status(500).json({ error: '서버 내부 오류가 발생했습니다.', details: err.message });
+    if (!res.headersSent) {
+      res.status(500).json({ error: '서버 내부 오류가 발생했습니다.', details: err.message });
+    }
   }
 });
 
 // Direct Download Endpoint (Zero Server Traffic 302 Redirect)
 app.get('/api/direct-download', async (req, res) => {
   try {
-    const { url, format_id, stream_url } = req.query;
+    const { stream_url: rawStreamUrl, sig, format_id: formatId } = req.query;
 
-    if (stream_url) {
-      return res.redirect(302, stream_url);
-    }
-
-    if (!url) {
-      return res.status(400).send('URL이 필요합니다.');
-    }
-
-    const binPath = await getYtDlpPath();
-    const args = getYtDlpArgs(['-g']);
-
-    if (format_id) {
-      args.push('-f', format_id);
-    }
-
-    args.push(url);
-
-    const ytdlp = spawn(binPath, args);
-    let stdoutData = '';
-
-    ytdlp.stdout.on('data', (chunk) => {
-      stdoutData += chunk.toString();
-    });
-
-    ytdlp.on('close', (code) => {
-      if (code !== 0 || !stdoutData.trim()) {
-        return res.status(500).send('다이렉트 다운로드 주소를 추출하지 못했습니다.');
+    if (rawStreamUrl !== undefined) {
+      const streamUrl = normalizeMediaUrl(rawStreamUrl);
+      if (!streamUrl || !verifyStreamSignature(streamUrl, sig)) {
+        return res.status(403).send('유효하지 않은 스트림 주소입니다. 링크를 다시 분석해주세요.');
       }
+      return res.redirect(302, streamUrl);
+    }
 
-      const directStreamUrl = stdoutData.trim().split('\n')[0].trim();
-      res.redirect(302, directStreamUrl);
-    });
+    const sourceUrl = normalizeMediaUrl(req.query.url);
+    if (!sourceUrl) {
+      return res.status(400).send('올바른 영상 주소(http/https)가 필요합니다.');
+    }
+
+    const extraArgs = ['-g'];
+    if (formatId !== undefined) {
+      if (typeof formatId !== 'string' || !FORMAT_ID_PATTERN.test(formatId)) {
+        return res.status(400).send('올바르지 않은 포맷 지정입니다.');
+      }
+      extraArgs.push('-f', formatId);
+    }
+    extraArgs.push('--', sourceUrl);
+
+    const { code, stdout, error } = await runYtDlp(extraArgs);
+    const resolved = (code === 0 && !error) ? normalizeMediaUrl(stdout.trim().split('\n')[0]) : null;
+
+    if (!resolved) {
+      return res.status(502).send('다이렉트 다운로드 주소를 추출하지 못했습니다.');
+    }
+
+    res.redirect(302, resolved);
   } catch (err) {
-    res.status(500).send('다이렉트 다운로드 처리 중 오류가 발생했습니다.');
+    console.error('[DIRECT DOWNLOAD ERROR]', err);
+    if (!res.headersSent) res.status(500).send('다이렉트 다운로드 처리 중 오류가 발생했습니다.');
   }
 });
 
+const CONTENT_TYPES = {
+  mp4: 'video/mp4',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4'
+};
+
+function parseProgressLine(line) {
+  const progressMatch = line.match(/\[download\]\s+(\d+\.?\d*)%/);
+  if (!progressMatch) return null;
+
+  const percent = parseFloat(progressMatch[1]);
+  const speedMatch = line.match(/at\s+([^\s]+)/);
+  const etaMatch = line.match(/ETA\s+([^\s]+)/);
+  const sizeMatch = line.match(/of\s+([^\s]+)/);
+
+  return {
+    status: 'downloading',
+    percent,
+    speed: speedMatch ? speedMatch[1] : '',
+    eta: etaMatch ? etaMatch[1] : '',
+    size: sizeMatch ? sizeMatch[1] : '',
+    message: `다운로드 중 (${percent}%)`
+  };
+}
+
 // Download & Stream Endpoint (Server side merge)
 app.get('/api/download', async (req, res) => {
+  const { type = 'video', quality = '1080p', downloadId, title } = req.query;
+
   try {
-    const { url, type = 'video', quality = '1080p', downloadId, title } = req.query;
-
-    if (!url) {
-      return res.status(400).json({ error: 'URL is required' });
+    const sourceUrl = normalizeMediaUrl(req.query.url);
+    if (!sourceUrl) {
+      return res.status(400).json({ error: '올바른 영상 주소(http/https)가 필요합니다.' });
     }
 
-    const binPath = await getYtDlpPath();
-    const safeTitle = sanitizeFilename(title || 'download');
+    const isAudio = type === 'audio';
+    // The "무손실 원본 오디오 (M4A)" card promises no re-encoding, so this path
+    // must not go through -x --audio-format mp3 like the 320kbps MP3 card does.
+    const wantsOriginalAudio = isAudio && quality === 'm4a';
+    const ext = !isAudio ? 'mp4' : (wantsOriginalAudio ? 'm4a' : 'mp3');
+
+    const safeTitle = sanitizeFilename(title) || 'download';
     const timestamp = Date.now();
-    const outputFilename = type === 'audio' ? `${safeTitle}_${timestamp}.mp3` : `${safeTitle}_${timestamp}.mp4`;
-    const outputPath = path.join(tempDir, outputFilename);
+    const outputPath = path.join(tempDir, `${safeTitle}_${timestamp}.${ext}`);
 
-    console.log(`[DOWNLOAD] Starting download for: ${url} (type: ${type}, quality: ${quality})`);
+    console.log(`[DOWNLOAD] Starting download for: ${sourceUrl} (type: ${type}, quality: ${quality})`);
 
-    const args = getYtDlpArgs([
-      '--newline',
-      '--progress',
-      '-o', outputPath
-    ]);
+    const extraArgs = ['--newline', '--progress', '-o', outputPath];
 
-    if (type === 'audio') {
-      args.push('-x', '--audio-format', 'mp3', '--audio-quality', quality === '320k' ? '0' : '2');
+    if (wantsOriginalAudio) {
+      extraArgs.push('-f', 'bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio');
+    } else if (isAudio) {
+      // A bitrate value gives a real 320kbps file; "0" would only be LAME's VBR
+      // preset, which averages well below the 320 kbps the UI advertises.
+      extraArgs.push('-x', '--audio-format', 'mp3', '--audio-quality', quality === '320k' ? '320K' : '192K');
     } else {
-      const height = parseInt(quality.replace('p', '')) || 1080;
-      args.push('-f', `bestvideo[height<=${height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${height}]+bestaudio/best[height<=${height}]/best`, '--merge-output-format', 'mp4');
+      const requested = parseInt(String(quality).replace('p', ''), 10) || 1080;
+      const height = Math.min(Math.max(requested, 144), 4320);
+      extraArgs.push(
+        '-f',
+        `bestvideo[height<=${height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${height}]+bestaudio/best[height<=${height}]/best`,
+        '--merge-output-format', 'mp4'
+      );
     }
 
-    args.push(url);
+    extraArgs.push('--', sourceUrl);
 
-    const ytdlp = spawn(binPath, args);
-
-    ytdlp.stdout.on('data', (chunk) => {
-      const text = chunk.toString();
-      const progressMatch = text.match(/\[download\]\s+(\d+\.?\d*)%/);
-      if (progressMatch && downloadId) {
-        const percent = parseFloat(progressMatch[1]);
-        const speedMatch = text.match(/at\s+([^\s]+)/);
-        const etaMatch = text.match(/ETA\s+([^\s]+)/);
-        const sizeMatch = text.match(/of\s+([^\s]+)/);
-
-        sendProgress(downloadId, {
-          status: 'downloading',
-          percent: percent,
-          speed: speedMatch ? speedMatch[1] : '',
-          eta: etaMatch ? etaMatch[1] : '',
-          size: sizeMatch ? sizeMatch[1] : '',
-          message: `다운로드 중 (${percent}%)`
-        });
-      }
-    });
-
-    ytdlp.on('close', (code) => {
-      if (code !== 0) {
-        if (downloadId) {
-          sendProgress(downloadId, { status: 'error', message: '다운로드에 실패했습니다.' });
-        }
-        if (!res.headersSent) {
-          return res.status(500).json({ error: '다운로드 실패' });
-        }
-        return;
-      }
-
-      let finalFilePath = outputPath;
-      if (!fs.existsSync(finalFilePath)) {
-        const baseWithoutExt = outputPath.replace(/\.[^/.]+$/, '');
-        const files = fs.readdirSync(tempDir);
-        const matched = files.find((f) => path.join(tempDir, f).startsWith(baseWithoutExt));
-        if (matched) {
-          finalFilePath = path.join(tempDir, matched);
+    // yt-dlp writes progress a line at a time, but chunk boundaries do not
+    // respect line boundaries - buffer until a newline arrives.
+    let progressBuffer = '';
+    const onStdoutChunk = downloadId
+      ? (chunk) => {
+        progressBuffer += chunk;
+        const lines = progressBuffer.split('\n');
+        progressBuffer = lines.pop() ?? '';
+        for (const line of lines) {
+          const progress = parseProgressLine(line);
+          if (progress) sendProgress(downloadId, progress);
         }
       }
+      : null;
 
-      if (!fs.existsSync(finalFilePath)) {
-        if (downloadId) sendProgress(downloadId, { status: 'error', message: '파일을 찾을 수 없습니다.' });
-        if (!res.headersSent) return res.status(500).json({ error: '파일 생성 실패' });
-        return;
+    // Everything this request wrote shares this prefix, so it can be listed and
+    // removed without touching a concurrent download's files.
+    const stem = `${safeTitle}_${timestamp}.`;
+    const listRequestFiles = () => {
+      try {
+        return fs.readdirSync(tempDir).filter((f) => f.startsWith(stem));
+      } catch (e) {
+        return [];
       }
+    };
+    const removeRequestFiles = () => {
+      for (const f of listRequestFiles()) {
+        try {
+          fs.unlinkSync(path.join(tempDir, f));
+        } catch (e) {}
+      }
+    };
 
+    const { code, stderr, error } = await runYtDlp(extraArgs, { onStdoutChunk, collectStdout: false });
+
+    if (error || code !== 0) {
+      console.error(`[DOWNLOAD ERROR] yt-dlp exited (code ${code}): ${error ? error.message : stderr}`);
+      // A failed post-processing step (e.g. missing ffmpeg) still leaves the
+      // raw stream yt-dlp already fetched on disk - drop it now rather than
+      // leaving it for the hourly sweep.
+      removeRequestFiles();
       if (downloadId) {
-        sendProgress(downloadId, { status: 'completed', percent: 100, message: '완료!' });
+        sendProgress(downloadId, { status: 'error', message: '다운로드에 실패했습니다.' });
       }
+      return res.status(502).json({ error: '다운로드 실패' });
+    }
 
-      const stat = fs.statSync(finalFilePath);
-      const downloadName = type === 'audio' ? `${safeTitle}.mp3` : `${safeTitle}.mp4`;
+    let finalFilePath = outputPath;
+    if (!fs.existsSync(finalFilePath)) {
+      // yt-dlp may settle on a different container than requested. Skip its
+      // in-progress .part files and .fNNN fragment files.
+      const matched = listRequestFiles()
+        .filter((f) => !f.endsWith('.part') && !/\.f\d+\./.test(f))
+        .sort();
+      if (matched.length > 0) finalFilePath = path.join(tempDir, matched[0]);
+    }
 
-      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(downloadName)}`);
-      res.setHeader('Content-Type', type === 'audio' ? 'audio/mpeg' : 'video/mp4');
-      res.setHeader('Content-Length', stat.size);
+    if (!fs.existsSync(finalFilePath)) {
+      removeRequestFiles();
+      if (downloadId) sendProgress(downloadId, { status: 'error', message: '파일을 찾을 수 없습니다.' });
+      return res.status(500).json({ error: '파일 생성 실패' });
+    }
 
-      const stream = fs.createReadStream(finalFilePath);
-      stream.pipe(res);
+    if (downloadId) {
+      sendProgress(downloadId, { status: 'completed', percent: 100, message: '완료!' });
+    }
 
-      stream.on('end', () => {
-        setTimeout(() => {
-          try {
-            if (fs.existsSync(finalFilePath)) fs.unlinkSync(finalFilePath);
-          } catch (e) {}
-        }, 10000);
-      });
+    const stat = fs.statSync(finalFilePath);
+    const downloadName = `${safeTitle}.${ext}`;
+
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(downloadName)}`);
+    res.setHeader('Content-Type', CONTENT_TYPES[ext]);
+    res.setHeader('Content-Length', stat.size);
+
+    const stream = fs.createReadStream(finalFilePath);
+
+    // pipe() does not forward source errors. Without this listener a read
+    // failure - or the cleanup sweep unlinking the file mid-transfer - emits an
+    // unhandled 'error' that terminates the process.
+    stream.on('error', (streamErr) => {
+      console.error('[DOWNLOAD STREAM ERROR]', streamErr);
+      res.destroy(streamErr);
     });
+
+    // 'close' fires on completion and on client abort alike, so the temp file
+    // is removed in both cases rather than waiting for the sweep.
+    stream.on('close', () => {
+      try {
+        if (fs.existsSync(finalFilePath)) fs.unlinkSync(finalFilePath);
+      } catch (e) {}
+    });
+
+    res.on('close', () => stream.destroy());
+    stream.pipe(res);
   } catch (err) {
     console.error('[DOWNLOAD FATAL]', err);
+    if (downloadId) {
+      sendProgress(downloadId, { status: 'error', message: '다운로드에 실패했습니다.' });
+    }
     if (!res.headersSent) res.status(500).json({ error: '서버 오류' });
   }
 });
 
 // Periodic cleanup of temporary files
 setInterval(() => {
+  let files = [];
   try {
-    const files = fs.readdirSync(tempDir);
-    const now = Date.now();
-    files.forEach((file) => {
+    files = fs.readdirSync(tempDir);
+  } catch (err) {
+    return;
+  }
+
+  const now = Date.now();
+  files.forEach((file) => {
+    // Per-file try/catch: a file removed by a finishing request between the
+    // readdir and the stat must not abort the rest of the sweep.
+    try {
       const filePath = path.join(tempDir, file);
       const stats = fs.statSync(filePath);
-      if (now - stats.mtimeMs > 20 * 60 * 1000) {
+      if (now - stats.mtimeMs > 60 * 60 * 1000) {
         fs.unlinkSync(filePath);
       }
-    });
-  } catch (err) {}
+    } catch (err) {}
+  });
 }, 15 * 60 * 1000);
 
 if (!process.env.VERCEL) {
