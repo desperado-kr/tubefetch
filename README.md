@@ -15,15 +15,41 @@
 
 ---
 
-## 🚀 실행 방법
+## 🚀 빠른 시작 및 다른 컴퓨터에서 이어서 작업하는 방법
 
-### 방법 1. 간편 실행 (권장)
-`start.bat` 파일을 더블클릭하면 서버가 실행되고 브라우저(`http://localhost:3000`)가 자동으로 열립니다.
+다른 컴퓨터에서 작업을 이어가거나 처음 세팅할 때 아래 순서대로 진행하시면 됩니다.
 
-### 방법 2. 터미널 수동 실행
+### 1. 저장소 클론 (새 컴퓨터에서 처음 받을 때)
 ```bash
-npm start
-# 브라우저에서 http://localhost:3000 접속
+git clone https://github.com/desperado-kr/tubefetch.git
+cd tubefetch
+```
+
+### 2. 패키지 설치
+```bash
+npm install
+```
+
+### 3. 서버 실행
+- **방법 A (윈도우 간편 실행 / 권장)**: 루트 폴더의 `start.bat` 더블클릭 (서버 실행 및 브라우저 자동 오픈)
+- **방법 B (터미널 수동 실행)**:
+  ```bash
+  npm start
+  ```
+  브라우저에서 `http://localhost:3000` 접속
+
+### 4. 기존 작업 컴퓨터에서 최신 코드 동기화할 때 (Git Pull)
+작업 전 항상 최신 코드를 내려받습니다:
+```bash
+git pull origin main
+```
+
+### 5. 작업 후 GitHub에 저장 및 자동 배포 (Git Push)
+작업 완료 후 GitHub에 올리면 Vercel과 Render가 자동으로 최신 버전으로 재배포됩니다:
+```bash
+git add .
+git commit -m "작업 내용 요약"
+git push origin main
 ```
 
 ---
