@@ -272,14 +272,16 @@ function getYtDlpArgs(extraArgs = []) {
     args.push('--extractor-args', process.env.YTDLP_EXTRACTOR_ARGS);
   }
 
-  if (isWindows) {
-    const denoPath = path.join(__dirname, 'bin', 'deno.exe');
-    if (fs.existsSync(denoPath)) {
-      args.push('--js-runtimes', `deno:${denoPath}`, '--remote-components', 'ejs:github');
-    }
-  } else {
-    args.push('--js-runtimes', 'node', '--remote-components', 'ejs:github');
-  }
+  // yt-dlp needs a JavaScript runtime to solve YouTube's signature challenges.
+  // This used to be a platform branch: Linux always got `--js-runtimes node`,
+  // while Windows got a runtime only if bin/deno.exe happened to exist - and it
+  // is gitignored, so it never did. That is why extraction worked on Render but
+  // failed locally with "No supported JavaScript runtime could be found".
+  // Node is always present (this is a Node process), so use it as the fallback
+  // on every platform and prefer a bundled deno when one is actually there.
+  const bundledDeno = path.join(__dirname, 'bin', isWindows ? 'deno.exe' : 'deno');
+  const jsRuntime = fs.existsSync(bundledDeno) ? `deno:${bundledDeno}` : 'node';
+  args.push('--js-runtimes', jsRuntime, '--remote-components', 'ejs:github');
 
   return [...args, ...extraArgs];
 }
@@ -696,9 +698,19 @@ app.get('/api/download', async (req, res) => {
     }
 
     if (!fs.existsSync(finalFilePath)) {
+      // Without ffmpeg, yt-dlp still exits 0: it downloads the video and audio
+      // parts and leaves them unmerged as .fNNN files. Say so, instead of a
+      // generic "file not created" that gives no clue where to look.
+      const unmerged = listRequestFiles().some((f) => /\.f\d+\./.test(f));
       removeRequestFiles();
-      if (downloadId) sendProgress(downloadId, { status: 'error', message: '파일을 찾을 수 없습니다.' });
-      return res.status(500).json({ error: '파일 생성 실패' });
+
+      const message = unmerged
+        ? '영상과 음성을 합치지 못했습니다. 서버에 ffmpeg가 설치되어 있는지 확인해주세요.'
+        : '파일 생성에 실패했습니다.';
+      console.error(`[DOWNLOAD] ${unmerged ? 'merge failed (ffmpeg missing?)' : 'output file not found'}: ${outputPath}`);
+
+      if (downloadId) sendProgress(downloadId, { status: 'error', message });
+      return res.status(500).json({ error: message });
     }
 
     if (downloadId) {
