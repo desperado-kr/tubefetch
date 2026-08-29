@@ -16,7 +16,17 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const isWindows = process.platform === 'win32';
 
-const YT_DLP_LINUX_URL = 'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp';
+// The bare "yt-dlp" asset is a ~2MB Python zipapp: it needs a system Python and
+// ships without curl_cffi, so every request goes out with a stock Python TLS
+// fingerprint and `--impersonate` has no targets available. The *_linux builds
+// are ~38MB PyInstaller bundles that include curl_cffi.
+const YT_DLP_LINUX_ASSET = process.arch === 'arm64' ? 'yt-dlp_linux_aarch64' : 'yt-dlp_linux';
+const YT_DLP_LINUX_URL = `https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/${YT_DLP_LINUX_ASSET}`;
+
+// Below every standalone build (Windows .exe ~17MB, Linux ~38MB) but far above
+// the ~2MB zipapp, so a stale zipapp or a truncated download is rejected rather
+// than adopted as a working binary.
+const MIN_BINARY_BYTES = 10 * 1024 * 1024;
 
 // Ensure temporary working directory
 const tempDir = path.join(os.tmpdir(), 'tubefetch_temp');
@@ -163,7 +173,7 @@ async function getYtDlpPath() {
   if (fs.existsSync(linuxBin)) {
     try {
       const stats = fs.statSync(linuxBin);
-      if (stats.size > 2000000) {
+      if (stats.size > MIN_BINARY_BYTES) {
         return linuxBin;
       }
     } catch (e) {}

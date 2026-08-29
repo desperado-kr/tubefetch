@@ -15,13 +15,19 @@ if (!fs.existsSync(binDir)) {
 const isWindows = process.platform === 'win32';
 const targetPath = isWindows ? path.join(binDir, 'yt-dlp.exe') : path.join(binDir, 'yt-dlp');
 
+// Use the standalone PyInstaller builds, not the bare "yt-dlp" zipapp. The
+// zipapp needs a system Python and ships without curl_cffi, which leaves
+// `--impersonate` with no targets and every request carrying a stock Python TLS
+// fingerprint - trivially flagged as a bot.
+const linuxAsset = process.arch === 'arm64' ? 'yt-dlp_linux_aarch64' : 'yt-dlp_linux';
 const url = isWindows
   ? 'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe'
-  : 'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp';
+  : `https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/${linuxAsset}`;
 
-// A usable yt-dlp build is well over this; anything smaller is a truncated
-// download or an error page that must not be left behind as "installed".
-const MIN_BINARY_BYTES = 2000000;
+// Below every standalone build (Windows .exe ~17MB, Linux ~38MB) but far above
+// the ~2MB zipapp. Anything smaller is a truncated download, an error page, or a
+// stale zipapp, and must not be left behind as "installed".
+const MIN_BINARY_BYTES = 10 * 1024 * 1024;
 
 console.log(`[POSTINSTALL] Checking yt-dlp binary for platform ${process.platform}...`);
 
