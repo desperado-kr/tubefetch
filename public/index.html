@@ -128,15 +128,8 @@
       </section>
 
       <!-- Top Leaderboard Ad Slot (Monetization) -->
-      <div class="ad-banner-slot top-banner">
-        <div class="ad-placeholder">
-          <span class="ad-tag" data-i18n="ad_sponsor_tag">스폰서 광고</span>
-          <div class="ad-content-box">
-            <span class="ad-brand">NordVPN ⚡</span>
-            <span class="ad-headline" data-i18n="ad_vpn_title">해외 차단 영상도 초고속으로 다운로드</span>
-            <a href="https://nordvpn.com" target="_blank" rel="noopener noreferrer" class="btn-ad-cta" data-i18n="ad_vpn_btn">특별 할인받기</a>
-          </div>
-        </div>
+      <div id="topAdBannerSlot" class="ad-banner-slot top-banner">
+        <!-- Injected dynamically by ads-config.js -->
       </div>
 
       <!-- Loading State Card -->
@@ -214,6 +207,11 @@
             </div>
           </div>
         </div>
+
+        <!-- In-Feed Result Banner (Monetization) -->
+        <div id="resultAdBannerSlot" class="ad-result-slot">
+          <!-- Injected dynamically by ads-config.js -->
+        </div>
       </div>
 
       <!-- 5-Second Ad Gate Modal (Rewarded Ad Gate) -->
@@ -231,17 +229,9 @@
 
           <p class="ad-modal-desc" data-i18n="ad_gate_desc">초고화질 스트림을 연결하고 있습니다. 잠시 후 자동으로 다운로드가 시작됩니다.</p>
 
-          <!-- Sponsored Ad Display Box (Monetag / Adsterra placeholder) -->
-          <div class="ad-gate-banner-box">
-            <div class="ad-inner-banner">
-              <div class="ad-sponsor-pill">Sponsored Partner</div>
-              <div class="ad-sponsor-content">
-                <div class="ad-sponsor-logo">🛡️ NordVPN</div>
-                <h4 data-i18n="ad_vpn_title">⚡ 해외 차단 영상도 초고속으로 다운로드</h4>
-                <p data-i18n="ad_vpn_desc">NordVPN을 통해 지역 제한 없이 전 세계 고화질 영상을 최고 속도로 안전하게 다운로드하세요.</p>
-                <a href="https://nordvpn.com" target="_blank" rel="noopener noreferrer" class="btn-ad-modal-cta" data-i18n="ad_vpn_btn">특별 할인받기 (최대 70% OFF)</a>
-              </div>
-            </div>
+          <!-- Dynamic Sponsored Ad / AdSense / Adsterra Display Box -->
+          <div id="adGateBannerContainer" class="ad-gate-banner-box">
+            <!-- Injected dynamically by ads-config.js -->
           </div>
 
           <div class="ad-modal-footer">
@@ -316,6 +306,11 @@
     <footer class="app-footer">
       <p>TubeFetch • High Performance Universal Video Extraction Web Engine</p>
     </footer>
+  </div>
+
+  <!-- Floating Sticky Bottom Ad (Monetization) -->
+  <div id="floatingBottomAdSlot" class="floating-bottom-ad-slot">
+    <!-- Injected dynamically by ads-config.js -->
   </div>
 
   <script type="module" src="/app.js"></script>

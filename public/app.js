@@ -1,8 +1,11 @@
-// =========================================================
-// TubeFetch Client Logic (Zero-Traffic CDN + Ad Gate Modal + i18n)
-// =========================================================
-
 import { translations } from './i18n.js';
+import { 
+  ADS_CONFIG, 
+  renderTopBanner, 
+  renderResultBanner, 
+  renderAdGateContent, 
+  renderFloatingBanner 
+} from './ads-config.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   // DOM Elements
@@ -34,6 +37,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const videoViews = document.getElementById('videoViews');
   const videoDate = document.getElementById('videoDate');
   const actionCardList = document.getElementById('actionCardList');
+
+  // Ad Slot Elements
+  const topAdBannerSlot = document.getElementById('topAdBannerSlot');
+  const resultAdBannerSlot = document.getElementById('resultAdBannerSlot');
+  const floatingBottomAdSlot = document.getElementById('floatingBottomAdSlot');
+  const adGateBannerContainer = document.getElementById('adGateBannerContainer');
 
   // Ad Gate Modal Elements
   const adGateModal = document.getElementById('adGateModal');
@@ -77,6 +86,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // 3. Initialize History
   renderHistory();
 
+  // 4. Initialize Ads & Monetization
+  renderAds();
+
   // Theme Toggle Event Listener
   themeToggleBtn.addEventListener('click', () => {
     currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
@@ -106,6 +118,14 @@ document.addEventListener('DOMContentLoaded', () => {
     return translations[currentLang]?.[key] || translations['en']?.[key] || key;
   }
 
+  function renderAds() {
+    renderTopBanner(topAdBannerSlot, currentLang);
+    renderFloatingBanner(floatingBottomAdSlot, currentLang);
+    if (currentVideoData) {
+      renderResultBanner(resultAdBannerSlot, currentLang);
+    }
+  }
+
   function applyLanguage(lang) {
     htmlEl.lang = lang;
     const dict = translations[lang] || translations['en'];
@@ -125,6 +145,9 @@ document.addEventListener('DOMContentLoaded', () => {
         el.placeholder = dict[key];
       }
     });
+
+    // Refresh ads in newly selected language
+    renderAds();
 
     // Re-render action cards if video card is open
     if (currentVideoData) {
@@ -190,11 +213,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 5-Second Ad Gate Modal Helper
+  // 5-Second Ad Gate Modal Helper (Rewarded Ad Gate)
   function openAdGateModal(onComplete) {
+    if (!ADS_CONFIG.adGate || !ADS_CONFIG.adGate.enabled) {
+      if (typeof onComplete === 'function') onComplete();
+      return;
+    }
+
     activeAdFinishCallback = onComplete;
+    renderAdGateContent(adGateBannerContainer, currentLang);
     adGateModal.classList.remove('hidden');
-    let timeLeft = 5;
+
+    let timeLeft = ADS_CONFIG.adGate.durationSeconds || 5;
     countdownNumber.textContent = timeLeft;
 
     if (countdownTimer) clearInterval(countdownTimer);
@@ -322,6 +352,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     renderActionCards(data);
+    renderResultBanner(resultAdBannerSlot, currentLang);
 
     resultSection.classList.remove('hidden');
     resultSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

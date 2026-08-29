@@ -1,0 +1,3 @@
+﻿# Google AdSense ads.txt template
+# Replace pub-0000000000000000 with your own AdSense Publisher ID (without "ca-")
+google.com, pub-0000000000000000, DIRECT, f08c47fec0942fa0
