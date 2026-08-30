@@ -336,6 +336,72 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Progress tracking clients (SSE)
 const progressClients = new Map();
 
+// ---------------------------------------------------------------------------
+// Extraction throughput controls
+//
+// With a datacenter IP the only thing keeping this service working is a single
+// signed-in session, and YouTube flags that session based on how it behaves.
+// So the scarce resource is not CPU - it is *how many times we ask YouTube
+// anything*. Everything here exists to ask less often.
+// ---------------------------------------------------------------------------
+
+// Signed googlevideo URLs stay valid for roughly six hours; three keeps a wide
+// safety margin while still absorbing the repeat traffic a popular video makes.
+const INFO_CACHE_TTL_MS = Number(process.env.INFO_CACHE_TTL_MS) || 3 * 60 * 60 * 1000;
+const INFO_CACHE_MAX_ENTRIES = 500;
+const infoCache = new Map();
+
+function getCachedInfo(url) {
+  const hit = infoCache.get(url);
+  if (!hit) return null;
+
+  if (Date.now() > hit.expiresAt) {
+    infoCache.delete(url);
+    return null;
+  }
+
+  // Refresh insertion order so the map's iteration order approximates LRU.
+  infoCache.delete(url);
+  infoCache.set(url, hit);
+  return hit.payload;
+}
+
+function setCachedInfo(url, payload) {
+  infoCache.set(url, { payload, expiresAt: Date.now() + INFO_CACHE_TTL_MS });
+  while (infoCache.size > INFO_CACHE_MAX_ENTRIES) {
+    infoCache.delete(infoCache.keys().next().value);
+  }
+}
+
+// A traffic spike must not become a burst of parallel requests to YouTube:
+// that is exactly the pattern that gets a session flagged, and it would also
+// run 512MB of RAM out of yt-dlp processes.
+const MAX_CONCURRENT_EXTRACTIONS = Number(process.env.MAX_CONCURRENT_EXTRACTIONS) || 2;
+let activeExtractions = 0;
+const extractionQueue = [];
+
+function acquireExtractionSlot() {
+  if (activeExtractions < MAX_CONCURRENT_EXTRACTIONS) {
+    activeExtractions++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => extractionQueue.push(resolve));
+}
+
+function releaseExtractionSlot() {
+  const next = extractionQueue.shift();
+  if (next) return next();
+  activeExtractions = Math.max(0, activeExtractions - 1);
+}
+
+// Set when YouTube last rejected us as a bot, so /api/health can say "the
+// cookies are gone" instead of leaving it to be guessed from the logs.
+let lastBotCheck = null;
+
+function isBotCheckError(text) {
+  return /sign in to confirm|not a bot|confirm you.{0,3}re not/i.test(String(text || ''));
+}
+
 function formatDuration(seconds) {
   if (!seconds || isNaN(seconds)) return '00:00';
   const hrs = Math.floor(seconds / 3600);
@@ -423,7 +489,16 @@ app.get('/api/health', async (req, res) => {
     cookies_configured: Boolean(getCookieFile()),
     pot_provider_configured: Boolean(process.env.YTDLP_POT_BASE_URL),
     stream_secret_from_env: Boolean(process.env.STREAM_SIGNING_SECRET),
-    extractor_args: process.env.YTDLP_EXTRACTOR_ARGS || null
+    extractor_args: process.env.YTDLP_EXTRACTOR_ARGS || null,
+
+    // The signal that actually matters day to day: if this is set, YouTube is
+    // refusing the session and the cookies need replacing.
+    last_bot_check: lastBotCheck,
+    cache_entries: infoCache.size,
+    cache_ttl_hours: Math.round(INFO_CACHE_TTL_MS / 3600000),
+    extractions_active: activeExtractions,
+    extractions_queued: extractionQueue.length,
+    max_concurrent_extractions: MAX_CONCURRENT_EXTRACTIONS
   });
 });
 
@@ -435,13 +510,38 @@ app.post('/api/info', async (req, res) => {
       return res.status(400).json({ error: '올바른 영상 주소(http/https)를 입력해주세요.' });
     }
 
+    // Serving a cached extraction costs YouTube nothing, which is the whole
+    // point: the session survives longer the less we use it.
+    const cached = getCachedInfo(cleanUrl);
+    if (cached) {
+      console.log(`[INFO] Cache hit: ${cleanUrl}`);
+      return res.json({ ...cached, cached: true });
+    }
+
     console.log(`[INFO] Fetching metadata for: ${cleanUrl}`);
 
-    const { code, stdout, stderr, error } = await runYtDlp(['--dump-single-json', '--', cleanUrl]);
+    await acquireExtractionSlot();
+    let result;
+    try {
+      result = await runYtDlp(['--dump-single-json', '--', cleanUrl]);
+    } finally {
+      releaseExtractionSlot();
+    }
+
+    // Another request may have extracted the same URL while this one queued.
+    const queuedHit = getCachedInfo(cleanUrl);
+    if (queuedHit) return res.json({ ...queuedHit, cached: true });
+
+    const { code, stdout, stderr, error } = result;
 
     if (error || code !== 0) {
       const reason = error ? error.message : stderr;
       console.error(`[ERROR] yt-dlp info failed (code ${code}): ${reason}`);
+
+      if (isBotCheckError(reason)) {
+        lastBotCheck = new Date().toISOString();
+        console.error('[AUTH] YouTube rejected the session as a bot. Cookies are missing, expired, or flagged.');
+      }
 
       console.log('[FALLBACK] Attempting YouTube oEmbed metadata extraction...');
       const fallback = await fetchOembedFallback(cleanUrl);
@@ -516,7 +616,7 @@ app.post('/api/info', async (req, res) => {
       });
     }
 
-    res.json({
+    const payload = {
       id: data.id,
       title: data.title,
       uploader: data.uploader || data.channel || 'Video Creator',
@@ -531,7 +631,14 @@ app.post('/api/info', async (req, res) => {
       resolutions: availableResolutions.length > 0 ? availableResolutions : [1080, 720, 480, 360],
       direct_streams: directStreams,
       limited_metadata: false
-    });
+    };
+
+    // Only successful extractions are cached. Caching a fallback would pin a
+    // degraded result in place for hours after the session recovers.
+    setCachedInfo(cleanUrl, payload);
+    lastBotCheck = null;
+
+    res.json({ ...payload, cached: false });
   } catch (err) {
     console.error('[API FATAL ERROR]', err);
     if (!res.headersSent) {
@@ -684,7 +791,13 @@ app.get('/api/download', async (req, res) => {
     const { code, stderr, error } = await runYtDlp(extraArgs, { onStdoutChunk, collectStdout: false });
 
     if (error || code !== 0) {
-      console.error(`[DOWNLOAD ERROR] yt-dlp exited (code ${code}): ${error ? error.message : stderr}`);
+      const reason = error ? error.message : stderr;
+      console.error(`[DOWNLOAD ERROR] yt-dlp exited (code ${code}): ${reason}`);
+
+      if (isBotCheckError(reason)) {
+        lastBotCheck = new Date().toISOString();
+        console.error('[AUTH] YouTube rejected the session as a bot during download.');
+      }
       // A failed post-processing step (e.g. missing ffmpeg) still leaves the
       // raw stream yt-dlp already fetched on disk - drop it now rather than
       // leaving it for the hourly sweep.
