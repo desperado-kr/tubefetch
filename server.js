@@ -236,6 +236,9 @@ function getCookieFile() {
     const target = path.join(secureDir, 'cookies.txt');
     // 0600: this file holds a live Google session.
     fs.writeFileSync(target, raw.endsWith('\n') ? raw : `${raw}\n`, { mode: 0o600 });
+    // writeFileSync honours `mode` only when it creates the file, so an
+    // existing cookies.txt would keep whatever permissions it already had.
+    fs.chmodSync(target, 0o600);
     cookieFilePath = target;
     console.log(`[COOKIES] Loaded ${raw.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length} cookie lines.`);
   } catch (err) {
@@ -376,22 +379,63 @@ function setCachedInfo(url, payload) {
 // A traffic spike must not become a burst of parallel requests to YouTube:
 // that is exactly the pattern that gets a session flagged, and it would also
 // run 512MB of RAM out of yt-dlp processes.
-const MAX_CONCURRENT_EXTRACTIONS = Number(process.env.MAX_CONCURRENT_EXTRACTIONS) || 2;
-let activeExtractions = 0;
-const extractionQueue = [];
+function createLimiter(max) {
+  let active = 0;
+  const queue = [];
 
-function acquireExtractionSlot() {
-  if (activeExtractions < MAX_CONCURRENT_EXTRACTIONS) {
-    activeExtractions++;
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => extractionQueue.push(resolve));
+  return {
+    max,
+    get active() { return active; },
+    get queued() { return queue.length; },
+    acquire() {
+      if (active < max) {
+        active++;
+        return Promise.resolve();
+      }
+      return new Promise((resolve) => queue.push(resolve));
+    },
+    release() {
+      // Hand the slot straight to the next waiter rather than decrementing and
+      // letting it re-race for it.
+      const next = queue.shift();
+      if (next) return next();
+      active = Math.max(0, active - 1);
+    }
+  };
 }
 
-function releaseExtractionSlot() {
-  const next = extractionQueue.shift();
-  if (next) return next();
-  activeExtractions = Math.max(0, activeExtractions - 1);
+const infoLimiter = createLimiter(Number(process.env.MAX_CONCURRENT_EXTRACTIONS) || 2);
+
+// Downloads run their own extraction and then an ffmpeg merge, so they need a
+// cap of their own: ten simultaneous downloads on a 512MB instance is both an
+// OOM and exactly the request burst that gets the session flagged.
+const downloadLimiter = createLimiter(Number(process.env.MAX_CONCURRENT_DOWNLOADS) || 2);
+
+// Simultaneous requests for the same URL share one extraction. The concurrency
+// cap alone only staggers duplicate work; it does not remove it, and duplicate
+// work here is spent against the one resource that decides how long the
+// signed-in session survives.
+const inFlightExtractions = new Map();
+
+function extractInfo(url) {
+  const existing = inFlightExtractions.get(url);
+  if (existing) return existing;
+
+  const run = (async () => {
+    await infoLimiter.acquire();
+    try {
+      // One line per real YouTube request - the number to watch when judging
+      // how hard this instance is leaning on the session.
+      console.log(`[EXTRACT] yt-dlp run: ${url}`);
+      return await runYtDlp(['--dump-single-json', '--', url]);
+    } finally {
+      infoLimiter.release();
+      inFlightExtractions.delete(url);
+    }
+  })();
+
+  inFlightExtractions.set(url, run);
+  return run;
 }
 
 // Set when YouTube last rejected us as a bot, so /api/health can say "the
@@ -470,7 +514,15 @@ function probeBinary(command) {
 
 // Diagnostics. Reports whether each piece of configuration is present - never
 // the values themselves, since cookies and the signing secret live here.
-app.get('/api/health', async (req, res) => {
+// Which binaries exist and which yt-dlp version is installed only change on
+// deploy, so probing them per request would spawn three processes on a public
+// unauthenticated endpoint for facts that never move.
+const HEALTH_PROBE_TTL_MS = 60 * 1000;
+let healthProbe = null;
+
+async function probeEnvironment() {
+  if (healthProbe && Date.now() < healthProbe.expiresAt) return healthProbe.value;
+
   const [ffmpeg, ffprobe] = await Promise.all([probeBinary('ffmpeg'), probeBinary('ffprobe')]);
 
   let ytdlpVersion = null;
@@ -478,6 +530,14 @@ app.get('/api/health', async (req, res) => {
     const { stdout, code } = await runYtDlp(['--version']);
     if (code === 0) ytdlpVersion = stdout.trim();
   } catch (e) {}
+
+  const value = { ffmpeg, ffprobe, ytdlpVersion };
+  healthProbe = { value, expiresAt: Date.now() + HEALTH_PROBE_TTL_MS };
+  return value;
+}
+
+app.get('/api/health', async (req, res) => {
+  const { ffmpeg, ffprobe, ytdlpVersion } = await probeEnvironment();
 
   res.json({
     ok: true,
@@ -496,9 +556,13 @@ app.get('/api/health', async (req, res) => {
     last_bot_check: lastBotCheck,
     cache_entries: infoCache.size,
     cache_ttl_hours: Math.round(INFO_CACHE_TTL_MS / 3600000),
-    extractions_active: activeExtractions,
-    extractions_queued: extractionQueue.length,
-    max_concurrent_extractions: MAX_CONCURRENT_EXTRACTIONS
+    extractions_active: infoLimiter.active,
+    extractions_queued: infoLimiter.queued,
+    extractions_coalescing: inFlightExtractions.size,
+    max_concurrent_extractions: infoLimiter.max,
+    downloads_active: downloadLimiter.active,
+    downloads_queued: downloadLimiter.queued,
+    max_concurrent_downloads: downloadLimiter.max
   });
 });
 
@@ -518,21 +582,14 @@ app.post('/api/info', async (req, res) => {
       return res.json({ ...cached, cached: true });
     }
 
+    // A YouTube request spent on a response nobody will read is one we cannot
+    // spend on a real user, so don't start on behalf of a client that already
+    // gave up.
+    if (req.socket.destroyed) return;
+
     console.log(`[INFO] Fetching metadata for: ${cleanUrl}`);
 
-    await acquireExtractionSlot();
-    let result;
-    try {
-      result = await runYtDlp(['--dump-single-json', '--', cleanUrl]);
-    } finally {
-      releaseExtractionSlot();
-    }
-
-    // Another request may have extracted the same URL while this one queued.
-    const queuedHit = getCachedInfo(cleanUrl);
-    if (queuedHit) return res.json({ ...queuedHit, cached: true });
-
-    const { code, stdout, stderr, error } = result;
+    const { code, stdout, stderr, error } = await extractInfo(cleanUrl);
 
     if (error || code !== 0) {
       const reason = error ? error.message : stderr;
@@ -788,7 +845,14 @@ app.get('/api/download', async (req, res) => {
       }
     };
 
-    const { code, stderr, error } = await runYtDlp(extraArgs, { onStdoutChunk, collectStdout: false });
+    await downloadLimiter.acquire();
+    let downloadRun;
+    try {
+      downloadRun = await runYtDlp(extraArgs, { onStdoutChunk, collectStdout: false });
+    } finally {
+      downloadLimiter.release();
+    }
+    const { code, stderr, error } = downloadRun;
 
     if (error || code !== 0) {
       const reason = error ? error.message : stderr;
