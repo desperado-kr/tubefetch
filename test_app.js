@@ -1,4 +1,5 @@
 import http from 'http';
+import app from './server.js';
 
 function checkHttp(url) {
   return new Promise((resolve, reject) => {
@@ -10,15 +11,28 @@ function checkHttp(url) {
 
 async function run() {
   console.log('Testing Web App & API Endpoints...');
-  const status = await checkHttp('http://localhost:3000');
-  console.log('HTTP status for http://localhost:3000:', status);
-  if (status !== 200) {
-    throw new Error(`Expected 200, got ${status}`);
+  let server = null;
+  let baseUrl = 'http://localhost:3000';
+  try {
+    await checkHttp(baseUrl);
+  } catch (e) {
+    server = app.listen(0);
+    const port = server.address().port;
+    baseUrl = `http://localhost:${port}`;
   }
-  console.log('✅ Server and web app are running successfully!');
+
+  try {
+    const status = await checkHttp(baseUrl);
+    console.log(`HTTP status for ${baseUrl}:`, status);
+    if (status !== 200) {
+      throw new Error(`Expected 200, got ${status}`);
+    }
+    console.log('✅ Server and web app are running successfully!');
+  } finally {
+    if (server) {
+      await new Promise((res) => server.close(res));
+    }
+  }
 }
 
-run().catch((err) => {
-  console.error('❌ Test failed:', err);
-  process.exit(1);
-});
+await run();

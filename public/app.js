@@ -562,6 +562,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     currentEventSource.onerror = (err) => {
       console.warn('SSE connection closed:', err);
+      if (currentEventSource) {
+        currentEventSource.close();
+        currentEventSource = null;
+      }
     };
 
     const downloadUrl = `${API_BASE}/api/download` +

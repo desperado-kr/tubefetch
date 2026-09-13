@@ -7,7 +7,7 @@ import os from 'os';
 import https from 'https';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { fetchOembedFallback } from './public/oembed.js';
+import { fetchOembedFallback, isYouTubeUrl, extractYouTubeVideoId } from './public/oembed.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -299,13 +299,33 @@ const MAX_STDERR_CAPTURE = 64 * 1024;
  *  - utf8 stream decoding, so a multi-byte character split across two chunks is
  *    not mangled into replacement characters.
  */
-async function runYtDlp(extraArgs, { onStdoutChunk = null, collectStdout = true } = {}) {
+async function runYtDlp(extraArgs, { onStdoutChunk = null, collectStdout = true, signal = null } = {}) {
   const binPath = await getYtDlpPath();
 
   return new Promise((resolve) => {
+    if (signal?.aborted) {
+      return resolve({ code: null, stdout: '', stderr: 'Aborted', error: new Error('Aborted') });
+    }
+
     const child = spawn(binPath, getYtDlpArgs(extraArgs));
     let stdout = '';
     let stderr = '';
+    let settled = false;
+
+    const onAbort = () => {
+      if (settled) return;
+      try {
+        if (isWindows && child.pid) {
+          spawn('taskkill', ['/pid', child.pid.toString(), '/f', '/t']);
+        } else {
+          child.kill('SIGTERM');
+        }
+      } catch (e) {}
+    };
+
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
 
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
@@ -322,11 +342,17 @@ async function runYtDlp(extraArgs, { onStdoutChunk = null, collectStdout = true 
     // Promises ignore a second settlement, so an 'error' followed by 'close'
     // resolves once with the error.
     child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      if (signal) signal.removeEventListener('abort', onAbort);
       console.error('[SPAWN ERROR]', err);
       resolve({ code: null, stdout, stderr, error: err });
     });
 
     child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      if (signal) signal.removeEventListener('abort', onAbort);
       resolve({ code, stdout, stderr, error: null });
     });
   });
@@ -354,23 +380,34 @@ const INFO_CACHE_TTL_MS = Number(process.env.INFO_CACHE_TTL_MS) || 3 * 60 * 60 *
 const INFO_CACHE_MAX_ENTRIES = 500;
 const infoCache = new Map();
 
+function getCacheKey(url) {
+  if (typeof url !== 'string') return url;
+  if (isYouTubeUrl(url)) {
+    const videoId = extractYouTubeVideoId(url);
+    if (videoId) return `yt:${videoId}`;
+  }
+  return url;
+}
+
 function getCachedInfo(url) {
-  const hit = infoCache.get(url);
+  const key = getCacheKey(url);
+  const hit = infoCache.get(key);
   if (!hit) return null;
 
   if (Date.now() > hit.expiresAt) {
-    infoCache.delete(url);
+    infoCache.delete(key);
     return null;
   }
 
   // Refresh insertion order so the map's iteration order approximates LRU.
-  infoCache.delete(url);
-  infoCache.set(url, hit);
+  infoCache.delete(key);
+  infoCache.set(key, hit);
   return hit.payload;
 }
 
 function setCachedInfo(url, payload) {
-  infoCache.set(url, { payload, expiresAt: Date.now() + INFO_CACHE_TTL_MS });
+  const key = getCacheKey(url);
+  infoCache.set(key, { payload, expiresAt: Date.now() + INFO_CACHE_TTL_MS });
   while (infoCache.size > INFO_CACHE_MAX_ENTRIES) {
     infoCache.delete(infoCache.keys().next().value);
   }
@@ -418,7 +455,8 @@ const downloadLimiter = createLimiter(Number(process.env.MAX_CONCURRENT_DOWNLOAD
 const inFlightExtractions = new Map();
 
 function extractInfo(url) {
-  const existing = inFlightExtractions.get(url);
+  const key = getCacheKey(url);
+  const existing = inFlightExtractions.get(key);
   if (existing) return existing;
 
   const run = (async () => {
@@ -430,11 +468,11 @@ function extractInfo(url) {
       return await runYtDlp(['--dump-single-json', '--', url]);
     } finally {
       infoLimiter.release();
-      inFlightExtractions.delete(url);
+      inFlightExtractions.delete(key);
     }
   })();
 
-  inFlightExtractions.set(url, run);
+  inFlightExtractions.set(key, run);
   return run;
 }
 
@@ -443,7 +481,7 @@ function extractInfo(url) {
 let lastBotCheck = null;
 
 function isBotCheckError(text) {
-  return /sign in to confirm|not a bot|confirm you.{0,3}re not/i.test(String(text || ''));
+  return /sign in to confirm|not a bot|confirm you.{0,3}re not|429|too many requests|rate.?limit/i.test(String(text || ''));
 }
 
 function formatDuration(seconds) {
@@ -731,7 +769,14 @@ app.get('/api/direct-download', async (req, res) => {
     }
     extraArgs.push('--', sourceUrl);
 
-    const { code, stdout, error } = await runYtDlp(extraArgs);
+    await infoLimiter.acquire();
+    let directRun;
+    try {
+      directRun = await runYtDlp(extraArgs);
+    } finally {
+      infoLimiter.release();
+    }
+    const { code, stdout, error } = directRun;
     const resolved = (code === 0 && !error) ? normalizeMediaUrl(stdout.trim().split('\n')[0]) : null;
 
     if (!resolved) {
@@ -845,14 +890,32 @@ app.get('/api/download', async (req, res) => {
       }
     };
 
+    const abortController = new AbortController();
+    const onClientClose = () => {
+      if (!res.writableEnded) {
+        abortController.abort();
+        removeRequestFiles();
+      }
+    };
+    req.on('close', onClientClose);
+
     await downloadLimiter.acquire();
     let downloadRun;
     try {
-      downloadRun = await runYtDlp(extraArgs, { onStdoutChunk, collectStdout: false });
+      if (abortController.signal.aborted) {
+        removeRequestFiles();
+        return;
+      }
+      downloadRun = await runYtDlp(extraArgs, { onStdoutChunk, collectStdout: false, signal: abortController.signal });
     } finally {
       downloadLimiter.release();
     }
     const { code, stderr, error } = downloadRun;
+
+    if (abortController.signal.aborted) {
+      removeRequestFiles();
+      return;
+    }
 
     if (error || code !== 0) {
       const reason = error ? error.message : stderr;
@@ -959,9 +1022,10 @@ setInterval(() => {
       }
     } catch (err) {}
   });
-}, 15 * 60 * 1000);
+}, 15 * 60 * 1000).unref();
 
-if (!process.env.VERCEL) {
+const isMainModule = Boolean(process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]));
+if (!process.env.VERCEL && process.env.NODE_ENV !== 'test' && isMainModule) {
   app.listen(PORT, () => {
     console.log(`====================================================`);
     console.log(`🚀 TubeFetch Server running on port ${PORT}`);
