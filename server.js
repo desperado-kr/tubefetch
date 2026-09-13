@@ -42,11 +42,52 @@ if (!fs.existsSync(tempDir)) {
 // Input validation
 // ---------------------------------------------------------------------------
 
+function isPrivateOrRestrictedHost(hostname) {
+  if (!hostname || typeof hostname !== 'string') return true;
+  const lower = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+
+  // Block loopback & local machine names
+  if (lower === 'localhost' || lower === '0.0.0.0' || lower === '::1' || lower === '::') return true;
+  if (lower.endsWith('.local') || lower.endsWith('.internal') || lower.endsWith('.localhost') || lower.endsWith('.arpa')) return true;
+
+  // Block cloud metadata services (AWS, GCP, Azure, OpenStack)
+  if (lower === '169.254.169.254' || lower === 'metadata.google.internal' || lower === 'instance-data') return true;
+
+  // Block plain unqualified hostnames (e.g., redis, db, internal)
+  if (!lower.includes('.') && !lower.includes(':')) return true;
+
+  // Block octal / hex / integer encoded IP addresses (e.g. 0x7f000001, 2130706433, 0177.0.0.1)
+  if (/^0x[0-9a-f]+$/i.test(lower) || /^\d+$/.test(lower) || /^0[0-7]+$/i.test(lower)) return true;
+
+  // IPv4 Private & Reserved Ranges
+  if (/^127\./.test(lower) ||
+      /^10\./.test(lower) ||
+      /^192\.168\./.test(lower) ||
+      /^169\.254\./.test(lower) ||
+      /^0\./.test(lower) ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(lower) ||
+      /^100\.(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-7])\./.test(lower) ||
+      /^192\.0\.2\./.test(lower) ||
+      /^198\.51\.100\./.test(lower) ||
+      /^203\.0\.113\./.test(lower) ||
+      /^(22[4-9]|23[0-9]|24[0-9]|25[0-5])\./.test(lower)) {
+    return true;
+  }
+
+  // IPv6 Unique Local / Link-Local / Loopback
+  if (/^fc|^fd/i.test(lower) || /^fe[89ab]/i.test(lower) || lower === '::1') {
+    return true;
+  }
+
+  return false;
+}
+
 // Every user-supplied value that reaches the yt-dlp argv goes through this.
 // Parsing as a URL rather than a loose regex also guarantees the value cannot
 // begin with "-", which yt-dlp would otherwise read as an option (--update-to
 // can replace the binary itself, --exec runs a shell command) instead of a
 // download target.
+// In addition, SSRF checks block internal networks, cloud metadata, and loopback.
 function normalizeMediaUrl(value) {
   if (typeof value !== 'string') return null;
 
@@ -61,6 +102,17 @@ function normalizeMediaUrl(value) {
   }
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+
+  // Reject abnormal ports (allow standard HTTP/HTTPS/dev ports only)
+  if (parsed.port && !['80', '443', '8080', '8443'].includes(parsed.port)) {
+    return null;
+  }
+
+  // Reject SSRF targets (localhost, 127.0.0.1, 169.254.169.254, 10.0.0.0/8, etc.)
+  if (isPrivateOrRestrictedHost(parsed.hostname)) {
+    return null;
+  }
+
   return parsed.toString();
 }
 
@@ -71,11 +123,11 @@ function sanitizeFilename(filename) {
     // Path separators, Windows-illegal characters, and "%" which yt-dlp would
     // otherwise interpret as an output-template placeholder.
     .replace(/[/\\?%*:|"<>]/g, '_')
-    // Control characters: keep them out of filenames and Content-Disposition.
-    .split('').filter((ch) => ch.charCodeAt(0) > 31 && ch.charCodeAt(0) !== 127).join('')
+    // Strip control characters, zero-width chars, and Right-to-Left Override (\u202E)
+    .replace(/[\x00-\x1f\x7f-\x9f\u200B-\u200D\uFEFF\u202E\u202D\u202A-\u202C]/g, '')
     .replace(/^\.+/, '')
     .trim()
-    .slice(0, 120);
+    .slice(0, 100);
 }
 
 // Stream URLs are handed to the browser together with an HMAC, and
@@ -299,7 +351,7 @@ const MAX_STDERR_CAPTURE = 64 * 1024;
  *  - utf8 stream decoding, so a multi-byte character split across two chunks is
  *    not mangled into replacement characters.
  */
-async function runYtDlp(extraArgs, { onStdoutChunk = null, collectStdout = true, signal = null } = {}) {
+async function runYtDlp(extraArgs, { onStdoutChunk = null, collectStdout = true, signal = null, timeoutMs = 8 * 60 * 1000 } = {}) {
   const binPath = await getYtDlpPath();
 
   return new Promise((resolve) => {
@@ -311,9 +363,9 @@ async function runYtDlp(extraArgs, { onStdoutChunk = null, collectStdout = true,
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let timeoutTimer = null;
 
-    const onAbort = () => {
-      if (settled) return;
+    const killProcess = () => {
       try {
         if (isWindows && child.pid) {
           spawn('taskkill', ['/pid', child.pid.toString(), '/f', '/t']);
@@ -322,6 +374,20 @@ async function runYtDlp(extraArgs, { onStdoutChunk = null, collectStdout = true,
         }
       } catch (e) {}
     };
+
+    const onAbort = () => {
+      if (settled) return;
+      killProcess();
+    };
+
+    if (timeoutMs > 0) {
+      timeoutTimer = setTimeout(() => {
+        if (!settled) {
+          console.warn(`[TIMEOUT] Process exceeded ${timeoutMs}ms. Forcing shutdown.`);
+          killProcess();
+        }
+      }, timeoutMs);
+    }
 
     if (signal) {
       signal.addEventListener('abort', onAbort, { once: true });
@@ -344,6 +410,7 @@ async function runYtDlp(extraArgs, { onStdoutChunk = null, collectStdout = true,
     child.on('error', (err) => {
       if (settled) return;
       settled = true;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
       if (signal) signal.removeEventListener('abort', onAbort);
       console.error('[SPAWN ERROR]', err);
       resolve({ code: null, stdout, stderr, error: err });
@@ -352,15 +419,107 @@ async function runYtDlp(extraArgs, { onStdoutChunk = null, collectStdout = true,
     child.on('close', (code) => {
       if (settled) return;
       settled = true;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
       if (signal) signal.removeEventListener('abort', onAbort);
       resolve({ code, stdout, stderr, error: null });
     });
   });
 }
 
+// ---------------------------------------------------------------------------
+// Security Headers & Proxy Trust
+// ---------------------------------------------------------------------------
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '0');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
+
 app.use(cors({ origin: '*' }));
-app.use(express.json());
+app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ---------------------------------------------------------------------------
+// In-Memory Token Bucket IP Rate Limiting (Anti-DDoS / Abuse Protection)
+// ---------------------------------------------------------------------------
+function createRateLimiter({ windowMs, max, message }) {
+  const hits = new Map();
+
+  setInterval(() => {
+    const now = Date.now();
+    for (const [ip, record] of hits.entries()) {
+      if (now > record.resetTime) {
+        hits.delete(ip);
+      }
+    }
+  }, 5 * 60 * 1000).unref();
+
+  return (req, res, next) => {
+    // In test environment, skip rate limiting unless explicitly tested
+    if (process.env.NODE_ENV === 'test' && !req.headers['x-test-ratelimit']) {
+      return next();
+    }
+
+    const ip = req.ip ||
+      req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+      req.socket?.remoteAddress ||
+      'unknown';
+
+    const now = Date.now();
+    let record = hits.get(ip);
+
+    if (!record || now > record.resetTime) {
+      record = { count: 1, resetTime: now + windowMs };
+      hits.set(ip, record);
+    } else {
+      record.count++;
+    }
+
+    const remaining = Math.max(0, max - record.count);
+    const retryAfter = Math.ceil((record.resetTime - now) / 1000);
+
+    res.setHeader('RateLimit-Limit', max);
+    res.setHeader('RateLimit-Remaining', remaining);
+    res.setHeader('RateLimit-Reset', retryAfter);
+
+    if (record.count > max) {
+      res.setHeader('Retry-After', retryAfter);
+      return res.status(429).json({
+        error: message || '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.',
+        retryAfter
+      });
+    }
+
+    next();
+  };
+}
+
+const infoRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: '영상 분석 요청 한도를 초과했습니다 (분당 30회). 잠시 후 다시 시도해주세요.'
+});
+
+const downloadRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 8,
+  message: '다운로드 요청 한도를 초과했습니다 (분당 8회). 잠시 후 다시 시도해주세요.'
+});
+
+const directDownloadRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 40,
+  message: '다이렉트 스트림 요청 한도를 초과했습니다 (분당 40회). 잠시 후 다시 시도해주세요.'
+});
 
 // Progress tracking clients (SSE)
 const progressClients = new Map();
@@ -416,18 +575,25 @@ function setCachedInfo(url, payload) {
 // A traffic spike must not become a burst of parallel requests to YouTube:
 // that is exactly the pattern that gets a session flagged, and it would also
 // run 512MB of RAM out of yt-dlp processes.
-function createLimiter(max) {
+function createLimiter(max, maxQueue = 20) {
   let active = 0;
   const queue = [];
 
   return {
     max,
+    maxQueue,
     get active() { return active; },
     get queued() { return queue.length; },
     acquire() {
       if (active < max) {
         active++;
         return Promise.resolve();
+      }
+      if (queue.length >= maxQueue) {
+        const busyErr = new Error('서버 처리 용량을 초과했습니다. 잠시 후 다시 시도해주세요.');
+        busyErr.status = 503;
+        busyErr.code = 'SERVER_BUSY';
+        return Promise.reject(busyErr);
       }
       return new Promise((resolve) => queue.push(resolve));
     },
@@ -441,12 +607,12 @@ function createLimiter(max) {
   };
 }
 
-const infoLimiter = createLimiter(Number(process.env.MAX_CONCURRENT_EXTRACTIONS) || 2);
+const infoLimiter = createLimiter(Number(process.env.MAX_CONCURRENT_EXTRACTIONS) || 2, 25);
 
 // Downloads run their own extraction and then an ffmpeg merge, so they need a
 // cap of their own: ten simultaneous downloads on a 512MB instance is both an
 // OOM and exactly the request burst that gets the session flagged.
-const downloadLimiter = createLimiter(Number(process.env.MAX_CONCURRENT_DOWNLOADS) || 2);
+const downloadLimiter = createLimiter(Number(process.env.MAX_CONCURRENT_DOWNLOADS) || 2, 15);
 
 // Simultaneous requests for the same URL share one extraction. The concurrency
 // cap alone only staggers duplicate work; it does not remove it, and duplicate
@@ -460,12 +626,17 @@ function extractInfo(url) {
   if (existing) return existing;
 
   const run = (async () => {
-    await infoLimiter.acquire();
+    try {
+      await infoLimiter.acquire();
+    } catch (err) {
+      inFlightExtractions.delete(key);
+      throw err;
+    }
     try {
       // One line per real YouTube request - the number to watch when judging
       // how hard this instance is leaning on the session.
       console.log(`[EXTRACT] yt-dlp run: ${url}`);
-      return await runYtDlp(['--dump-single-json', '--', url]);
+      return await runYtDlp(['--dump-single-json', '--', url], { timeoutMs: 45 * 1000 });
     } finally {
       infoLimiter.release();
       inFlightExtractions.delete(key);
@@ -605,7 +776,7 @@ app.get('/api/health', async (req, res) => {
 });
 
 // Video Info Endpoint
-app.post('/api/info', async (req, res) => {
+app.post('/api/info', infoRateLimiter, async (req, res) => {
   try {
     const cleanUrl = normalizeMediaUrl(req.body?.url);
     if (!cleanUrl) {
@@ -735,6 +906,9 @@ app.post('/api/info', async (req, res) => {
 
     res.json({ ...payload, cached: false });
   } catch (err) {
+    if (err.status === 503 || err.code === 'SERVER_BUSY') {
+      return res.status(503).json({ error: '서버 처리 용량을 초과했습니다. 잠시 후 다시 시도해주세요.' });
+    }
     console.error('[API FATAL ERROR]', err);
     if (!res.headersSent) {
       res.status(500).json({ error: '서버 내부 오류가 발생했습니다.', details: err.message });
@@ -743,7 +917,7 @@ app.post('/api/info', async (req, res) => {
 });
 
 // Direct Download Endpoint (Zero Server Traffic 302 Redirect)
-app.get('/api/direct-download', async (req, res) => {
+app.get('/api/direct-download', directDownloadRateLimiter, async (req, res) => {
   try {
     const { stream_url: rawStreamUrl, sig, format_id: formatId } = req.query;
 
@@ -769,7 +943,15 @@ app.get('/api/direct-download', async (req, res) => {
     }
     extraArgs.push('--', sourceUrl);
 
-    await infoLimiter.acquire();
+    try {
+      await infoLimiter.acquire();
+    } catch (limiterErr) {
+      if (limiterErr.status === 503 || limiterErr.code === 'SERVER_BUSY') {
+        return res.status(503).send('서버 처리 용량을 초과했습니다. 잠시 후 다시 시도해주세요.');
+      }
+      throw limiterErr;
+    }
+
     let directRun;
     try {
       directRun = await runYtDlp(extraArgs);
@@ -816,13 +998,23 @@ function parseProgressLine(line) {
 }
 
 // Download & Stream Endpoint (Server side merge)
-app.get('/api/download', async (req, res) => {
+app.get('/api/download', downloadRateLimiter, async (req, res) => {
   const { type = 'video', quality = '1080p', downloadId, title } = req.query;
 
   try {
     const sourceUrl = normalizeMediaUrl(req.query.url);
     if (!sourceUrl) {
       return res.status(400).json({ error: '올바른 영상 주소(http/https)가 필요합니다.' });
+    }
+
+    // Protection against huge livestream / multi-hour video overload (max 3 hours for merge)
+    if (req.query.duration) {
+      const dur = parseFloat(req.query.duration);
+      if (dur > 3 * 3600) {
+        return res.status(400).json({
+          error: '서버 과부하 방지를 위해 3시간 이하의 영상만 1080p/4K 변환이 가능합니다. 720p 초고속 직다운로드를 이용해주세요.'
+        });
+      }
     }
 
     const isAudio = type === 'audio';
@@ -837,7 +1029,7 @@ app.get('/api/download', async (req, res) => {
 
     console.log(`[DOWNLOAD] Starting download for: ${sourceUrl} (type: ${type}, quality: ${quality})`);
 
-    const extraArgs = ['--newline', '--progress', '-o', outputPath];
+    const extraArgs = ['--newline', '--progress', '--max-filesize', '1.5G', '-o', outputPath];
 
     if (wantsOriginalAudio) {
       extraArgs.push('-f', 'bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio');
@@ -899,7 +1091,15 @@ app.get('/api/download', async (req, res) => {
     };
     req.on('close', onClientClose);
 
-    await downloadLimiter.acquire();
+    try {
+      await downloadLimiter.acquire();
+    } catch (limiterErr) {
+      if (limiterErr.status === 503 || limiterErr.code === 'SERVER_BUSY') {
+        if (downloadId) sendProgress(downloadId, { status: 'error', message: '서버 처리 용량을 초과했습니다.' });
+        return res.status(503).json({ error: '서버 처리 용량을 초과했습니다. 잠시 후 다시 시도해주세요.' });
+      }
+      throw limiterErr;
+    }
     let downloadRun;
     try {
       if (abortController.signal.aborted) {
@@ -993,6 +1193,10 @@ app.get('/api/download', async (req, res) => {
     res.on('close', () => stream.destroy());
     stream.pipe(res);
   } catch (err) {
+    if (err.status === 503 || err.code === 'SERVER_BUSY') {
+      if (downloadId) sendProgress(downloadId, { status: 'error', message: '서버 처리 용량을 초과했습니다.' });
+      return res.status(503).json({ error: '서버 처리 용량을 초과했습니다. 잠시 후 다시 시도해주세요.' });
+    }
     console.error('[DOWNLOAD FATAL]', err);
     if (downloadId) {
       sendProgress(downloadId, { status: 'error', message: '다운로드에 실패했습니다.' });

@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node test_app.js && node test_edge.js && node test_ads.js && node test_i18n_theme.js && node test_all_fixes.js && node test_seo_neo.js",
+    "test": "node test_app.js && node test_edge.js && node test_ads.js && node test_i18n_theme.js && node test_all_fixes.js && node test_seo_neo.js && node test_security.js",
     "postinstall": "node scripts/install-ytdlp.js"
   },
   "dependencies": {
