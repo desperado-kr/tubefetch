@@ -1,4 +1,4 @@
-﻿# 🤝 TubeFetch 프로젝트 작업 인수인계 문서 (HANDOFF.md)
+# 🤝 TubeFetch 프로젝트 작업 인수인계 문서 (HANDOFF.md)
 
 ## 📌 1. 프로젝트 개요
 - **프로젝트명**: TubeFetch (유튜브 & 소셜 미디어 고화질 비디오/MP3 원클릭 다운로더)
@@ -23,9 +23,9 @@
 1. **상단 리더보드 배너 (`#topAdBannerSlot`)**:
    - 사용자 Adsterra 728x90 실제 광고 코드 (`key: a32ecf32dad36eb94fff29440474d54b`) 적용 완료
 2. **결과창 인피드 배너 (`#resultAdBannerSlot`)**:
-   - 영상 링크 분석 후 다운로드 카드 바로 아래 고주목도 영역에 광고 노출
-3. **하단 고정 플로팅 배너 (`#floatingBottomAdSlot`)**:
-   - 화면 하단 고정 바 + 닫기(X) 버튼 지원 (Adsterra Social Bar 연동 대기)
+   - 영상 링크 분석 후 다운로드 카드 바로 아래 고주목도 영역 (`key: 5cfe9f9d3dd1586eac073102dca2c9bd`, 300x250) 적용 완료
+3. **하단 고정 플로팅 / Social Bar (`#floatingBottomAdSlot`)**:
+   - Adsterra Social Bar 스크립트 (`pl31323997.profitableratecpmnetwork.com`) 연동 완료 (단가 및 CTR 극대화)
 
 ### C. 하이브리드 광고 모드 (`activeProvider: 'hybrid'`)
 - `bannersProvider: 'adsterra'`: 배너 영역은 Adsterra 광고 송출
