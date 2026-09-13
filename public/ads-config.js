@@ -44,7 +44,7 @@ export const ADS_CONFIG = {
     //    중복 impression 으로 집계되어 계정 정지 사유가 됩니다.
     banners: {
       top: { key: 'a32ecf32dad36eb94fff29440474d54b', width: 728, height: 90 },
-      result: { key: '', width: 300, height: 250 }
+      result: { key: '5cfe9f9d3dd1586eac073102dca2c9bd', width: 300, height: 250 }
     },
 
     // ▼▼▼ PASTE ZONE 2 - 하단 플로팅 / Social Bar ▼▼▼
