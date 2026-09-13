@@ -775,6 +775,15 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
+// GeoIP Resolution Endpoint (Inspects Vercel/Cloudflare/Proxy Country Headers)
+app.get('/api/geoip', (req, res) => {
+  const country = req.headers['x-vercel-ip-country'] ||
+                  req.headers['cf-ipcountry'] ||
+                  req.headers['x-country-code'] ||
+                  null;
+  res.json({ ok: true, country });
+});
+
 // Video Info Endpoint
 app.post('/api/info', infoRateLimiter, async (req, res) => {
   try {

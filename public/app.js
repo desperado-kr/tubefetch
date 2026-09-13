@@ -84,7 +84,42 @@ document.addEventListener('DOMContentLoaded', () => {
   // not the live input value - the user may have pasted something else since.
   let currentSourceUrl = null;
   let currentEventSource = null;
-  let currentLang = localStorage.getItem('tubefetch_lang') || 'ko';
+  const SUPPORTED_LANGS = ['ko', 'en', 'ja', 'zh', 'es'];
+
+  function getLanguageFromCountry(countryCode) {
+    if (!countryCode) return 'en';
+    const c = String(countryCode).toUpperCase().trim();
+    if (c === 'KR') return 'ko';
+    if (c === 'JP') return 'ja';
+    if (['CN', 'TW', 'HK', 'MO'].includes(c)) return 'zh';
+    const spanishCountries = [
+      'ES', 'MX', 'AR', 'CO', 'CL', 'PE', 'VE', 'EC',
+      'GT', 'CU', 'BO', 'DO', 'HN', 'PY', 'SV', 'NI',
+      'CR', 'PR', 'PA', 'UY', 'GQ'
+    ];
+    if (spanishCountries.includes(c)) return 'es';
+    // All other countries default to 'en' (international default)
+    return 'en';
+  }
+
+  function getBrowserFallbackLanguage() {
+    const navLang = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
+    if (navLang.startsWith('ko')) return 'ko';
+    if (navLang.startsWith('ja')) return 'ja';
+    if (navLang.startsWith('zh')) return 'zh';
+    if (navLang.startsWith('es')) return 'es';
+    return 'en';
+  }
+
+  const manualLang = localStorage.getItem('tubefetch_manual_lang');
+  let currentLang = 'en';
+
+  if (manualLang && SUPPORTED_LANGS.includes(manualLang)) {
+    currentLang = manualLang;
+  } else {
+    currentLang = getBrowserFallbackLanguage();
+  }
+
   let currentTheme = localStorage.getItem('tubefetch_theme') || 'dark';
   let countdownTimer = null;
   let activeAdFinishCallback = null;
@@ -112,6 +147,62 @@ document.addEventListener('DOMContentLoaded', () => {
   // 4. Optional standalone ad scripts (popunder / interstitial)
   initOptionalAdScripts();
 
+  // 5. Asynchronous Geo-IP Detection based on user's real location
+  initGeoIpDetection();
+
+  async function initGeoIpDetection() {
+    // If user has already explicitly chosen their preferred language, respect it
+    if (localStorage.getItem('tubefetch_manual_lang')) return;
+
+    try {
+      let country = null;
+
+      // 1. Try backend GeoIP endpoint (reads Vercel / Cloudflare IP country headers)
+      try {
+        const res = await fetch(`${API_BASE}/api/geoip`, { signal: AbortSignal.timeout(3500) });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.country) country = data.country;
+        }
+      } catch (e) {}
+
+      // 2. Fallback to public ultra-fast GeoIP service
+      if (!country) {
+        try {
+          const res = await fetch('https://api.country.is', { signal: AbortSignal.timeout(3500) });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.country) country = data.country;
+          }
+        } catch (e) {}
+      }
+
+      // 3. Fallback to ipapi.co
+      if (!country) {
+        try {
+          const res = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(3500) });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.country_code) country = data.country_code;
+          }
+        } catch (e) {}
+      }
+
+      if (country) {
+        const detected = getLanguageFromCountry(country);
+        if (detected && detected !== currentLang && !localStorage.getItem('tubefetch_manual_lang')) {
+          console.log(`[GEO-IP] Detected region: ${country} -> switching language to: ${detected}`);
+          currentLang = detected;
+          langSelect.value = currentLang;
+          applyLanguage(currentLang);
+          localStorage.setItem('tubefetch_lang', currentLang);
+        }
+      }
+    } catch (err) {
+      console.warn('[GEO-IP] GeoIP detection skipped:', err.message);
+    }
+  }
+
   // Theme Toggle Event Listener
   themeToggleBtn.addEventListener('click', () => {
     currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
@@ -134,6 +225,7 @@ document.addEventListener('DOMContentLoaded', () => {
   langSelect.addEventListener('change', (e) => {
     currentLang = e.target.value;
     applyLanguage(currentLang);
+    localStorage.setItem('tubefetch_manual_lang', currentLang);
     localStorage.setItem('tubefetch_lang', currentLang);
   });
 
@@ -596,8 +688,8 @@ document.addEventListener('DOMContentLoaded', () => {
     progressBar.style.width = '0%';
     progressBar.style.background = '';
     progressPercentBadge.textContent = '0%';
-    progressStatusTitle.textContent = `${label} 다운로드 준비 중...`;
-    progressMessage.textContent = '고화질 미디어 스트림을 수집하고 있습니다.';
+    progressStatusTitle.textContent = `${label} ${t('progress_status_preparing')}`;
+    progressMessage.textContent = t('progress_msg_collecting');
     progressSpeed.textContent = '-';
     progressSize.textContent = '-';
     progressEta.textContent = '-';
@@ -615,32 +707,32 @@ document.addEventListener('DOMContentLoaded', () => {
           const pct = Math.round(data.percent || 0);
           progressBar.style.width = `${pct}%`;
           progressPercentBadge.textContent = `${pct}%`;
-          progressStatusTitle.textContent = `다운로드 중 (${pct}%)`;
+          progressStatusTitle.textContent = `${t('btn_downloading')} (${pct}%)`;
           progressMessage.textContent = data.message || '';
-          if (data.speed) progressSpeed.textContent = `속도: ${data.speed}`;
-          if (data.size) progressSize.textContent = `크기: ${data.size}`;
-          if (data.eta) progressEta.textContent = `남은 시간: ${data.eta}`;
+          if (data.speed) progressSpeed.textContent = `${data.speed}`;
+          if (data.size) progressSize.textContent = `${data.size}`;
+          if (data.eta) progressEta.textContent = `${data.eta}`;
         } else if (data.status === 'converting') {
           progressBar.style.width = '96%';
           progressPercentBadge.textContent = '96%';
-          progressStatusTitle.textContent = 'FFmpeg 고품질 인코딩 중...';
+          progressStatusTitle.textContent = t('progress_status_converting');
           progressMessage.textContent = data.message || '';
         } else if (data.status === 'finalizing') {
           progressBar.style.width = '99%';
           progressPercentBadge.textContent = '99%';
-          progressStatusTitle.textContent = '파일 전송 준비 중...';
+          progressStatusTitle.textContent = t('progress_status_finalizing');
         } else if (data.status === 'completed') {
           progressBar.style.width = '100%';
           progressPercentBadge.textContent = '100%';
-          progressStatusTitle.textContent = '다운로드 완료!';
+          progressStatusTitle.textContent = t('progress_status_completed');
           currentEventSource.close();
           setTimeout(() => {
             progressModal.classList.add('hidden');
             showThankYouCard(label);
           }, 1200);
         } else if (data.status === 'error') {
-          progressStatusTitle.textContent = '고화질 변환 안내';
-          progressMessage.textContent = data.message || '유튜브 정책 또는 서버 지연으로 변환이 일시 제한되었습니다. 720p 직다운로드를 이용해주세요.';
+          progressStatusTitle.textContent = t('progress_status_notice');
+          progressMessage.textContent = data.message || t('progress_msg_bot');
           progressBar.style.width = '100%';
           progressBar.style.background = 'linear-gradient(90deg, #f59e0b 0%, #ef4444 100%)';
           progressPercentBadge.textContent = '!';
