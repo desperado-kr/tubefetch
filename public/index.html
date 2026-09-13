@@ -3,8 +3,117 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TubeFetch - 고화질 영상 & 음원 원클릭 다운로더</title>
-  <meta name="description" content="YouTube, TikTok, Instagram 등 다양한 소셜 미디어 영상과 고음질 MP3를 1클릭으로 간편하게 다운로드할 수 있는 웹 도구">
+  <title>TubeFetch - 유튜브 영상 & 고음질 MP3 원클릭 무료 다운로더 (1080p·4K)</title>
+  <meta name="description" content="유튜브(YouTube), 쇼츠, 틱톡, 릴스 링크만 넣으면 4K·1080p 고화질 MP4 및 320kbps MP3 음원을 프로그램 설치 없이 웹 브라우저에서 1초 만에 무료 다운로드합니다.">
+  <meta name="keywords" content="유튜브 다운로더, 유튜브 음원추출, 유튜브 mp3 다운로드, 유튜브 1080p 다운, 유튜브 쇼츠 다운, 유튜브 동영상 다운, 유튜브 고화질 다운로드, 유튜브 mp3 변환기, tubefetch">
+  <meta name="author" content="TubeFetch">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <link rel="canonical" href="https://tubefetch-rho.vercel.app/">
+
+  <!-- Naver Search Advisor & Google Search Console Verification Placeholders (NEO / SEO) -->
+  <!-- 네이버 서치어드바이저 등록 시 아래 content 값을 발급받은 키로 변경하세요 -->
+  <meta name="naver-site-verification" content="여기에_네이버_서치어드바이저_코드_입력">
+  <!-- 구글 서치콘솔 등록 시 아래 content 값을 발급받은 키로 변경하세요 -->
+  <meta name="google-site-verification" content="여기에_구글_서치콘솔_코드_입력">
+
+  <!-- Open Graph / KakaoTalk / Naver Cafe / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="TubeFetch">
+  <meta property="og:title" content="TubeFetch - 유튜브 영상 & 고음질 MP3 원클릭 무료 다운로더">
+  <meta property="og:description" content="4K·1080p Full HD MP4 비디오와 320kbps MP3 음원을 프로그램 설치 없이 웹 브라우저에서 1초 만에 무료로 다운로드하세요.">
+  <meta property="og:url" content="https://tubefetch-rho.vercel.app/">
+  <meta property="og:image" content="https://tubefetch-rho.vercel.app/og-image.svg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="TubeFetch - 유튜브 고화질 다운로더">
+  <meta property="og:locale" content="ko_KR">
+  <meta property="og:locale:alternate" content="en_US">
+  <meta property="og:locale:alternate" content="ja_JP">
+  <meta property="og:locale:alternate" content="zh_CN">
+  <meta property="og:locale:alternate" content="es_ES">
+
+  <!-- Twitter Cards -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="TubeFetch - 유튜브 영상 & MP3 다운로더">
+  <meta name="twitter:description" content="1080p/4K 고화질 비디오 및 320kbps MP3 원클릭 무료 다운로드">
+  <meta name="twitter:image" content="https://tubefetch-rho.vercel.app/og-image.svg">
+
+  <!-- Structured Data: WebApplication (JSON-LD) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "@id": "https://tubefetch-rho.vercel.app/#webapp",
+    "name": "TubeFetch",
+    "url": "https://tubefetch-rho.vercel.app/",
+    "applicationCategory": "MultimediaApplication",
+    "operatingSystem": "All",
+    "browserRequirements": "Requires JavaScript. Requires HTML5.",
+    "description": "웹 브라우저에서 유튜브 동영상 및 오디오 음원을 고화질(4K, 1080p MP4, 320kbps MP3)로 1클릭 다운로드하는 고성능 웹 서비스",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "KRW"
+    },
+    "featureList": [
+      "4K 및 1080p Full HD MP4 고화질 비디오 다운로드",
+      "320kbps 초고음질 MP3 및 무손실 M4A 음원 추출",
+      "유튜브 쇼츠, 틱톡, 인스타그램 릴스 링크 지원",
+      "무설치 웹 브라우저 1초 직다운로드"
+    ]
+  }
+  </script>
+
+  <!-- Structured Data: FAQPage (JSON-LD for AEO & Naver AI Briefing) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "유튜브 동영상을 1080p / 4K 고화질 MP4로 다운로드하는 방법은?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "유튜브 영상 URL을 복사하여 TubeFetch 입력창에 붙여넣고 '다운로드 준비' 버튼을 클릭한 후, '최고화질 비디오 (1080p/4K MP4)' 카드를 선택하면 5초 후 자동으로 고화질 합성이 완료되어 다운로드됩니다."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "유튜브에서 음원(MP3/M4A)만 고음질로 추출할 수 있나요?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "네, 320kbps 고음질 MP3 변환과 무손실 원본 M4A 오디오 추출을 모두 지원하며, 1클릭으로 간편하게 음원만 즉시 다운로드할 수 있습니다."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "별도의 프로그램이나 앱 설치 없이 무료로 이용할 수 있나요?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "네, TubeFetch는 100% 웹 브라우저에서 구동되므로 PC와 모바일 스마트폰(아이폰, 갤럭시)에서 별도 프로그램이나 확장 프로그램 설치 없이 완전 무료로 이용할 수 있습니다."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "유튜브 쇼츠(Shorts)나 틱톡, 인스타그램 릴스 영상도 지원되나요?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "네, 일반 유튜브 링크뿐만 아니라 유튜브 쇼츠(Shorts), 틱톡, 인스타그램 릴스 링크도 자동으로 인식하여 고화질 영상으로 다운로드할 수 있습니다."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "유튜브 동영상 다운로드는 저작권법상 합법인가요?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "대한민국 저작권법 제30조(사적이용을 위한 복제)에 따라 공표된 저작물을 영리 목적이 아닌 개인 학습, 연구, 개인 소장 목적으로 복제하는 것은 합법적으로 허용됩니다. 다만 다운로드한 파일을 인터넷에 재배포하거나 상업적으로 이용하는 것은 금지됩니다."
+        }
+      }
+    ]
+  }
+  </script>
+
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -281,6 +390,70 @@
         </div>
         <div id="historyList" class="history-grid">
           <!-- History items injected via JS -->
+        </div>
+      </section>
+
+      <!-- FAQ Section (AEO, GEO & Naver AI Briefing Optimized) -->
+      <section class="faq-section" id="faqSection">
+        <div class="faq-card">
+          <div class="faq-header">
+            <div class="faq-badge-pill">FAQ</div>
+            <h3 class="faq-title" data-i18n="faq_main_title">자주 묻는 질문 (FAQ)</h3>
+            <p class="faq-subtitle" data-i18n="faq_main_desc">TubeFetch 서비스 이용 및 고화질 다운로드에 대한 핵심 질문과 답변입니다.</p>
+          </div>
+          <div class="faq-list">
+            <details class="faq-item" open>
+              <summary class="faq-question">
+                <span>Q. 유튜브 동영상을 1080p / 4K 고화질 MP4로 다운로드하는 방법은?</span>
+                <svg class="faq-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </summary>
+              <div class="faq-answer">
+                <p><strong>결론:</strong> 유튜브 영상 URL을 복사하여 TubeFetch 입력창에 붙여넣고 '다운로드 준비' 버튼을 클릭한 후, '최고화질 비디오 (1080p/4K MP4)' 카드를 선택하면 5초 후 자동으로 고화질 합성이 완료되어 다운로드됩니다.</p>
+                <p class="faq-note">※ 720p HD 해상도는 대기 시간 없이 즉시 1초 직다운로드(0초)를 제공합니다.</p>
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary class="faq-question">
+                <span>Q. 유튜브에서 음원(MP3/M4A)만 고음질로 추출할 수 있나요?</span>
+                <svg class="faq-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </summary>
+              <div class="faq-answer">
+                <p><strong>결론:</strong> 네, 320kbps 고음질 MP3 변환과 무손실 원본 M4A 오디오 추출을 모두 지원하며, 1클릭으로 간편하게 음원만 즉시 다운로드할 수 있습니다.</p>
+                <p class="faq-note">※ 스마트폰 및 차량용 오디오에서 가장 완벽한 음질을 제공합니다.</p>
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary class="faq-question">
+                <span>Q. 별도의 프로그램이나 앱 설치 없이 무료로 이용할 수 있나요?</span>
+                <svg class="faq-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </summary>
+              <div class="faq-answer">
+                <p><strong>결론:</strong> 네, TubeFetch는 100% 웹 브라우저에서 구동되므로 PC와 모바일 스마트폰(아이폰, 갤럭시)에서 별도 프로그램이나 확장 프로그램 설치 없이 완전 무료로 이용할 수 있습니다.</p>
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary class="faq-question">
+                <span>Q. 유튜브 쇼츠(Shorts)나 틱톡, 인스타그램 릴스 영상도 지원되나요?</span>
+                <svg class="faq-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </summary>
+              <div class="faq-answer">
+                <p><strong>결론:</strong> 네, 일반 유튜브 링크뿐만 아니라 유튜브 쇼츠(Shorts), 틱톡, 인스타그램 릴스 링크도 자동으로 인식하여 고화질 영상으로 다운로드할 수 있습니다.</p>
+              </div>
+            </details>
+
+            <details class="faq-item">
+              <summary class="faq-question">
+                <span>Q. 유튜브 동영상 다운로드는 저작권법상 합법인가요?</span>
+                <svg class="faq-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </summary>
+              <div class="faq-answer">
+                <p><strong>결론:</strong> 대한민국 저작권법 제30조(사적이용을 위한 복제)에 따라 공표된 저작물을 영리 목적이 아닌 개인 학습, 연구, 개인 소장 목적으로 복제하는 것은 합법적으로 허용됩니다. 다만 다운로드한 파일을 인터넷에 재배포하거나 상업적으로 이용하는 것은 금지됩니다.</p>
+              </div>
+            </details>
+          </div>
         </div>
       </section>
 

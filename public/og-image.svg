@@ -1,0 +1,61 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090d16"/>
+      <stop offset="50%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f43f5e"/>
+      <stop offset="100%" stop-color="#ec4899"/>
+    </linearGradient>
+    <radialGradient id="glowTop" cx="30%" cy="20%" r="50%">
+      <stop offset="0%" stop-color="#f43f5e" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#f43f5e" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowBottom" cx="80%" cy="80%" r="50%">
+      <stop offset="0%" stop-color="#6366f1" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bgGrad)"/>
+  <rect width="1200" height="630" fill="url(#glowTop)"/>
+  <rect width="1200" height="630" fill="url(#glowBottom)"/>
+
+  <!-- Card Frame -->
+  <rect x="80" y="70" width="1040" height="490" rx="28" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="2"/>
+
+  <!-- Logo Icon -->
+  <rect x="140" y="140" width="90" height="90" rx="22" fill="url(#accentGrad)"/>
+  <path d="M198 165a6.5 6.5 0 0 0-4.5-4.5C189.5 160 174 160 174 160s-15.5 0-19.5.5a6.5 6.5 0 0 0-4.5 4.5C149 169 149 177 149 177s0 8 1 12a6.5 6.5 0 0 0 4.5 4.5c4 .5 19.5.5 19.5.5s15.5 0 19.5-.5a6.5 6.5 0 0 0 4.5-4.5c1-4 1-12 1-12s0-8-1-12z" fill="#ffffff"/>
+  <polygon points="169,170 184,177 169,184" fill="#f43f5e"/>
+
+  <!-- Title -->
+  <text x="255" y="195" font-family="-apple-system, BlinkMacSystemFont, Pretendard, 'Segoe UI', sans-serif" font-size="56" font-weight="800" fill="#ffffff">TubeFetch</text>
+  <rect x="525" y="152" width="76" height="34" rx="10" fill="url(#accentGrad)"/>
+  <text x="563" y="174" font-family="sans-serif" font-size="16" font-weight="800" fill="#ffffff" text-anchor="middle">PRO</text>
+
+  <!-- Subtitle -->
+  <text x="140" y="295" font-family="-apple-system, BlinkMacSystemFont, Pretendard, 'Segoe UI', sans-serif" font-size="44" font-weight="700" fill="#f8fafc">
+    유튜브 영상 &amp; 고음질 MP3 원클릭 무료 다운로더
+  </text>
+  <text x="140" y="348" font-family="-apple-system, BlinkMacSystemFont, Pretendard, 'Segoe UI', sans-serif" font-size="24" font-weight="400" fill="#94a3b8">
+    프로그램 설치 없이 4K / 1080p Full HD MP4 및 320kbps MP3 음원을 웹에서 바로 다운로드
+  </text>
+
+  <!-- Badges -->
+  <g transform="translate(140, 410)">
+    <rect x="0" y="0" width="180" height="52" rx="14" fill="#334155" fill-opacity="0.8" stroke="#475569" stroke-width="1.5"/>
+    <text x="90" y="32" font-family="sans-serif" font-size="18" font-weight="600" fill="#38bdf8" text-anchor="middle">⚡ 4K / 1080p MP4</text>
+
+    <rect x="200" y="0" width="180" height="52" rx="14" fill="#334155" fill-opacity="0.8" stroke="#475569" stroke-width="1.5"/>
+    <text x="290" y="32" font-family="sans-serif" font-size="18" font-weight="600" fill="#34d399" text-anchor="middle">🎵 320kbps MP3</text>
+
+    <rect x="400" y="0" width="180" height="52" rx="14" fill="#334155" fill-opacity="0.8" stroke="#475569" stroke-width="1.5"/>
+    <text x="490" y="32" font-family="sans-serif" font-size="18" font-weight="600" fill="#fbbf24" text-anchor="middle">📱 모바일/PC 100%</text>
+
+    <rect x="600" y="0" width="180" height="52" rx="14" fill="#334155" fill-opacity="0.8" stroke="#475569" stroke-width="1.5"/>
+    <text x="690" y="32" font-family="sans-serif" font-size="18" font-weight="600" fill="#f43f5e" text-anchor="middle">🔒 설치 없이 무료</text>
+  </g>
+</svg>

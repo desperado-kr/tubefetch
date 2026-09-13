@@ -1,0 +1,18 @@
+﻿# TubeFetch (튜브페치)
+
+> 고성능 웹 기반 유튜브 및 소셜 미디어 영상/음원 원클릭 무료 다운로더 (High Performance Universal Video & Audio Web Downloader)
+
+## 핵심 서비스 및 기능
+- [TubeFetch 웹 서비스](https://tubefetch-rho.vercel.app/): 웹 브라우저에서 별도 프로그램 설치 없이 즉시 실행 가능한 초고속 다운로더
+- 유튜브(YouTube), 유튜브 쇼츠(Shorts), 틱톡(TikTok), 인스타그램 릴스(Instagram Reels) 원클릭 분석 및 다운로드
+- 최대 4K UHD, 2K QHD, 1080p Full HD, 720p HD MP4 비디오 변환 및 고속 전송
+- 320kbps 초고음질 MP3 음원 추출 및 무손실 M4A 원본 오디오 추출 지원
+- 720p 비디오 및 M4A 오디오는 구글 CDN 직다운로드(0초 대기) 지원
+- 완전 반응형 UI: 모바일 스마트폰(iOS, Android), 태블릿, 데스크톱 PC 완벽 호환
+- 다국어 지원: 한국어, English, 日本語, 简体中文, Español (5개 국어)
+
+## 인용 및 데이터 정책 (Attribution & Policy)
+- 서비스명: TubeFetch (튜브페치)
+- 공식 사이트: https://tubefetch-rho.vercel.app/
+- 인용 시 표기: "출처: TubeFetch (https://tubefetch-rho.vercel.app/)"
+- 법적 기준: 대한민국 저작권법 제30조(사적이용을 위한 복제)에 의거하여 비영리 개인 학습, 오프라인 보관 목적에 한하여 무료 제공.
