@@ -798,17 +798,34 @@ app.post('/api/info', infoRateLimiter, async (req, res) => {
 
     console.log(`[INFO] Fetching metadata for: ${cleanUrl}`);
 
-    const { code, stdout, stderr, error } = await extractInfo(cleanUrl);
+    let extractResult = await extractInfo(cleanUrl);
 
-    if (error || code !== 0) {
-      const reason = error ? error.message : stderr;
-      console.error(`[ERROR] yt-dlp info failed (code ${code}): ${reason}`);
+    if (extractResult.error || extractResult.code !== 0) {
+      const reason = extractResult.error ? extractResult.error.message : extractResult.stderr;
+      console.error(`[ERROR] yt-dlp info failed (code ${extractResult.code}): ${reason}`);
 
       if (isBotCheckError(reason)) {
         lastBotCheck = new Date().toISOString();
-        console.error('[AUTH] YouTube rejected the session as a bot. Cookies are missing, expired, or flagged.');
+        console.error('[AUTH] YouTube rejected the session as a bot. Retrying with android client...');
+        try {
+          await infoLimiter.acquire();
+          const androidRun = await runYtDlp(['--dump-single-json', '--extractor-args', 'youtube:player_client=android', '--', cleanUrl], { timeoutMs: 45 * 1000 });
+          if (!androidRun.error && androidRun.code === 0) {
+            console.log('[AUTH SUCCESS] Android client extraction succeeded!');
+            extractResult = androidRun;
+          }
+        } catch (retryErr) {
+          console.warn('[AUTH RETRY FAILED]', retryErr.message);
+        } finally {
+          infoLimiter.release();
+        }
       }
+    }
 
+    const { code, stdout, stderr, error } = extractResult;
+
+    if (error || code !== 0) {
+      const reason = error ? error.message : stderr;
       console.log('[FALLBACK] Attempting YouTube oEmbed metadata extraction...');
       const fallback = await fetchOembedFallback(cleanUrl);
       if (fallback) {
@@ -1129,10 +1146,15 @@ app.get('/api/download', downloadRateLimiter, async (req, res) => {
       // raw stream yt-dlp already fetched on disk - drop it now rather than
       // leaving it for the hourly sweep.
       removeRequestFiles();
+      const isBot = isBotCheckError(reason);
+      const friendlyMsg = isBot
+        ? '유튜브 보안 정책으로 해당 영상의 고화질 서버 변환이 제한되었습니다. 720p 초고속 직다운로드를 이용해주세요.'
+        : '고화질 영상 변환 중 오류가 발생했습니다. 720p 직다운로드를 이용해주세요.';
+
       if (downloadId) {
-        sendProgress(downloadId, { status: 'error', message: '다운로드에 실패했습니다.' });
+        sendProgress(downloadId, { status: 'error', message: friendlyMsg });
       }
-      return res.status(502).json({ error: '다운로드 실패' });
+      return res.status(502).json({ error: '다운로드 실패', message: friendlyMsg, is_bot_check: isBot });
     }
 
     let finalFilePath = outputPath;

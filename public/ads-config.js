@@ -302,6 +302,46 @@ function buildAdsterraBannerHtml(slot) {
   `;
 }
 
+/**
+ * Isolated Sandboxed Iframe Renderer for Adsterra Banners
+ * Prevents global window.atOptions collisions, document.write hazards,
+ * and event listener interference with main app buttons and UI.
+ */
+export function renderAdsterraIframe(containerEl, slot) {
+  if (!containerEl || !slot || !ADSTERRA_KEY_PATTERN.test(String(slot.key || ''))) return false;
+  if (liveThirdPartySlots.has(containerEl)) return true;
+  liveThirdPartySlots.add(containerEl);
+
+  const key = slot.key;
+  const width = Number(slot.width) || 300;
+  const height = Number(slot.height) || 250;
+
+  const iframe = document.createElement('iframe');
+  iframe.width = String(width);
+  iframe.height = String(height);
+  iframe.style.width = `${width}px`;
+  iframe.style.height = `${height}px`;
+  iframe.style.border = 'none';
+  iframe.style.overflow = 'hidden';
+  iframe.style.margin = '0 auto';
+  iframe.style.display = 'block';
+  iframe.scrolling = 'no';
+  iframe.title = 'Advertisement';
+
+  const docHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent;display:flex;justify-content:center;align-items:center;}</style></head><body><script type="text/javascript">atOptions={'key':'${key}','format':'iframe','height':${height},'width':${width},'params':{}};</script><script type="text/javascript" src="https://www.highrevenueformat.com/${key}/invoke.js"></script></body></html>`;
+
+  iframe.srcdoc = docHtml;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'adsterra-banner-wrapper';
+  wrapper.style.cssText = `display:flex; justify-content:center; align-items:center; width:100%; min-height:${height}px; overflow:hidden;`;
+  wrapper.appendChild(iframe);
+
+  containerEl.innerHTML = '';
+  containerEl.appendChild(wrapper);
+  return true;
+}
+
 function getBannerProvider() {
   if (ADS_CONFIG.activeProvider === 'hybrid') {
     return ADS_CONFIG.hybrid?.bannersProvider || 'adsterra';
@@ -367,10 +407,8 @@ export function renderTopBanner(containerEl, lang = 'ko') {
   }
 
   if (provider === 'adsterra') {
-    const html = buildAdsterraBannerHtml(ADS_CONFIG.adsterra.banners.top);
-    if (html) {
+    if (renderAdsterraIframe(containerEl, ADS_CONFIG.adsterra.banners.top)) {
       containerEl.className = 'ad-banner-slot top-banner';
-      renderThirdPartyOnce(containerEl, html);
       return;
     }
   }
@@ -412,9 +450,7 @@ export function renderResultBanner(containerEl, lang = 'ko') {
   }
 
   if (provider === 'adsterra') {
-    const html = buildAdsterraBannerHtml(ADS_CONFIG.adsterra.banners.result);
-    if (html) {
-      renderThirdPartyOnce(containerEl, html);
+    if (renderAdsterraIframe(containerEl, ADS_CONFIG.adsterra.banners.result)) {
       return;
     }
   }
@@ -455,9 +491,7 @@ export function renderThankYouAd(containerEl, lang = 'ko') {
   const provider = getBannerProvider();
 
   if (provider === 'adsterra' && ADS_CONFIG.adsterra.banners.thankYou?.key) {
-    const html = buildAdsterraBannerHtml(ADS_CONFIG.adsterra.banners.thankYou);
-    if (html) {
-      renderThirdPartyOnce(containerEl, html);
+    if (renderAdsterraIframe(containerEl, ADS_CONFIG.adsterra.banners.thankYou)) {
       return;
     }
   }
@@ -505,9 +539,7 @@ export function renderAdGateContent(containerEl, lang = 'ko') {
   }
 
   if (provider === 'adsterra') {
-    const html = buildAdsterraBannerHtml(ADS_CONFIG.adsterra.banners.result);
-    if (html) {
-      renderThirdPartyOnce(containerEl, html);
+    if (renderAdsterraIframe(containerEl, ADS_CONFIG.adsterra.banners.result)) {
       return;
     }
   }

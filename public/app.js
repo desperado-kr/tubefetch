@@ -62,6 +62,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const progressSize = document.getElementById('progressSize');
   const progressEta = document.getElementById('progressEta');
   const progressMessage = document.getElementById('progressMessage');
+  const progressErrorActions = document.getElementById('progressErrorActions');
+  const progressFallbackBtn = document.getElementById('progressFallbackBtn');
+  const progressCloseBtn = document.getElementById('progressCloseBtn');
 
   // Thank You / Download Started Card Elements
   const thankYouCard = document.getElementById('thankYouCard');
@@ -250,6 +253,35 @@ document.addEventListener('DOMContentLoaded', () => {
       urlInput.value = '';
       window.scrollTo({ top: 0, behavior: 'smooth' });
       urlInput.focus();
+    });
+  }
+
+  // Progress Modal Error Action Listeners
+  if (progressFallbackBtn) {
+    progressFallbackBtn.addEventListener('click', () => {
+      progressModal.classList.add('hidden');
+      if (progressErrorActions) progressErrorActions.classList.add('hidden');
+
+      const streams = currentVideoData?.direct_streams || [];
+      const signed = streams.filter((s) => s.url && s.url_sig);
+      const directStream = signed.find((s) => s.type === 'video_with_audio');
+
+      if (directStream) {
+        triggerDirectDownload(directStream, directStream.resolution || '720p HD');
+      } else {
+        triggerServerDownload('video', '720p', '720p MP4');
+      }
+    });
+  }
+
+  if (progressCloseBtn) {
+    progressCloseBtn.addEventListener('click', () => {
+      progressModal.classList.add('hidden');
+      if (progressErrorActions) progressErrorActions.classList.add('hidden');
+      if (currentEventSource) {
+        currentEventSource.close();
+        currentEventSource = null;
+      }
     });
   }
 
@@ -539,6 +571,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Helper for initiating downloads safely via hidden iframe (prevents top-level navigation on errors)
+  function triggerHiddenDownload(url) {
+    let iframe = document.getElementById('hidden-download-iframe');
+    if (!iframe) {
+      iframe = document.createElement('iframe');
+      iframe.id = 'hidden-download-iframe';
+      iframe.style.display = 'none';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      document.body.appendChild(iframe);
+    }
+    iframe.src = url;
+  }
+
   // 2. Server Download with SSE Progress
   function triggerServerDownload(type, quality, label) {
     if (!currentVideoData || !currentSourceUrl) return;
@@ -546,7 +592,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const downloadId = 'dl_' + Math.random().toString(36).substring(2, 9);
 
     progressModal.classList.remove('hidden');
+    if (progressErrorActions) progressErrorActions.classList.add('hidden');
     progressBar.style.width = '0%';
+    progressBar.style.background = '';
     progressPercentBadge.textContent = '0%';
     progressStatusTitle.textContent = `${label} 다운로드 준비 중...`;
     progressMessage.textContent = '고화질 미디어 스트림을 수집하고 있습니다.';
@@ -591,14 +639,18 @@ document.addEventListener('DOMContentLoaded', () => {
             showThankYouCard(label);
           }, 1200);
         } else if (data.status === 'error') {
-          progressStatusTitle.textContent = '오류 발생';
-          progressMessage.textContent = data.message || '다운로드에 실패했습니다.';
-          currentEventSource.close();
-          // Leave the failure on screen long enough to read, then clear it -
-          // otherwise the card sits there for the rest of the session.
-          setTimeout(() => {
-            progressModal.classList.add('hidden');
-          }, 6000);
+          progressStatusTitle.textContent = '고화질 변환 안내';
+          progressMessage.textContent = data.message || '유튜브 정책 또는 서버 지연으로 변환이 일시 제한되었습니다. 720p 직다운로드를 이용해주세요.';
+          progressBar.style.width = '100%';
+          progressBar.style.background = 'linear-gradient(90deg, #f59e0b 0%, #ef4444 100%)';
+          progressPercentBadge.textContent = '!';
+          if (currentEventSource) {
+            currentEventSource.close();
+            currentEventSource = null;
+          }
+          if (progressErrorActions) {
+            progressErrorActions.classList.remove('hidden');
+          }
         }
       } catch (e) {
         console.error('SSE JSON error:', e);
@@ -620,12 +672,8 @@ document.addEventListener('DOMContentLoaded', () => {
       `&downloadId=${encodeURIComponent(downloadId)}` +
       `&title=${encodeURIComponent(currentVideoData.title || '')}`;
 
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = '';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // Trigger file download in isolated hidden iframe (never departs the page)
+    triggerHiddenDownload(downloadUrl);
 
     saveToHistory({
       id: currentVideoData.id,
