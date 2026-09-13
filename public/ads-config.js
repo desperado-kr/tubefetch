@@ -51,7 +51,7 @@ export const ADS_CONFIG = {
     // Adsterra 에서 "Social Bar" 단위를 만들면 invoke.js 스크립트 URL 이 나옵니다.
     // 그 URL 만 넣으세요. Social Bar 는 스스로 화면 하단에 바를 그리므로,
     // 값이 채워지면 내장 플로팅 배너는 자동으로 숨겨집니다.
-    socialBarScriptUrl: '',
+    socialBarScriptUrl: 'https://pl31323997.profitableratecpmnetwork.com/78/ef/02/78ef023d7e0b85749b0fa9394e296f01.js',
 
     // Popunder / Direct SmartLink 스크립트 URL (선택)
     popunderScriptUrl: ''
@@ -217,7 +217,8 @@ function escapeHtml(value) {
 
 function safeHttpUrl(value) {
   try {
-    const parsed = new URL(String(value), window.location.href);
+    const base = typeof window !== 'undefined' && window.location ? window.location.href : 'https://tubefetch-rho.vercel.app';
+    const parsed = new URL(String(value), base);
     return (parsed.protocol === 'http:' || parsed.protocol === 'https:') ? parsed.toString() : '#';
   } catch (e) {
     return '#';
