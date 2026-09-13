@@ -11,7 +11,7 @@ async function run() {
 
   // 1. Check supported languages and ad keys
   const langs = ['ko', 'en', 'ja', 'zh', 'es'];
-  const requiredKeys = ['ad_gate_title', 'ad_gate_desc', 'ad_vpn_title', 'btn_download_now'];
+  const requiredKeys = ['ad_gate_title', 'ad_gate_desc', 'ad_vpn_title', 'btn_download_now', 'thank_you_title', 'thank_you_btn_new'];
   for (const lang of langs) {
     if (!translations[lang]) {
       throw new Error(`Missing translations for ${lang}`);

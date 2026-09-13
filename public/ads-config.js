@@ -44,7 +44,8 @@ export const ADS_CONFIG = {
     //    중복 impression 으로 집계되어 계정 정지 사유가 됩니다.
     banners: {
       top: { key: 'a32ecf32dad36eb94fff29440474d54b', width: 728, height: 90 },
-      result: { key: '5cfe9f9d3dd1586eac073102dca2c9bd', width: 300, height: 250 }
+      result: { key: '5cfe9f9d3dd1586eac073102dca2c9bd', width: 300, height: 250 },
+      thankYou: { key: '', width: 300, height: 250 }
     },
 
     // ▼▼▼ PASTE ZONE 2 - 하단 플로팅 / Social Bar ▼▼▼
@@ -53,7 +54,12 @@ export const ADS_CONFIG = {
     // 값이 채워지면 내장 플로팅 배너는 자동으로 숨겨집니다.
     socialBarScriptUrl: 'https://pl31323997.profitableratecpmnetwork.com/78/ef/02/78ef023d7e0b85749b0fa9394e296f01.js',
 
-    // Popunder / Direct SmartLink 스크립트 URL (선택)
+    // ▼▼▼ PASTE ZONE 4 - Direct Link (SmartLink) ▼▼▼
+    // Adsterra 대시보드 > Direct Links > "+ Add Direct Link" 에서 생성된 URL을 넣으세요.
+    directLinkUrl: '',
+    openDirectLinkOnGate: true,
+
+    // Popunder 스크립트 URL (선택)
     popunderScriptUrl: ''
   },
 
@@ -311,14 +317,40 @@ function getAdGateProvider() {
 }
 
 /**
- * Monetag Direct Link, if configured. app.js opens this from the ad gate's
- * skip button so the popup rides a real user gesture.
+ * Direct Link (SmartLink) URL from Adsterra or Monetag.
+ * Opens from real user gestures (e.g. ad gate skip/download button or download click).
  */
 export function getAdGateDirectLink() {
-  const { directLinkUrl, openDirectLinkOnGate } = ADS_CONFIG.monetag;
-  if (!openDirectLinkOnGate || !directLinkUrl) return null;
-  const safe = safeHttpUrl(directLinkUrl);
+  const adsterraLink = (ADS_CONFIG.adsterra?.openDirectLinkOnGate && ADS_CONFIG.adsterra?.directLinkUrl) || '';
+  const monetagLink = (ADS_CONFIG.monetag?.openDirectLinkOnGate && ADS_CONFIG.monetag?.directLinkUrl) || '';
+  const target = adsterraLink || monetagLink;
+  if (!target) return null;
+  const safe = safeHttpUrl(target);
   return safe === '#' ? null : safe;
+}
+
+/**
+ * Trigger Direct Link with user frequency capping (default: 10 minute cooldown)
+ * or forced on user click gesture.
+ */
+export function tryTriggerDirectLink(force = false) {
+  const link = getAdGateDirectLink();
+  if (!link) return false;
+
+  const now = Date.now();
+  const lastOpened = parseInt(sessionStorage.getItem('tubefetch_directlink_last') || '0', 10);
+  const cooldownMs = 10 * 60 * 1000;
+
+  if (force || (now - lastOpened > cooldownMs)) {
+    sessionStorage.setItem('tubefetch_directlink_last', String(now));
+    try {
+      window.open(link, '_blank', 'noopener,noreferrer');
+      return true;
+    } catch (e) {
+      console.warn('[ADS] Direct link popup was blocked:', e);
+    }
+  }
+  return false;
 }
 
 /**
@@ -408,6 +440,46 @@ export function renderResultBanner(containerEl, lang = 'ko') {
         </div>
         <a href="${escapeHtml(safeHttpUrl(campaign.ctaUrl))}" target="_blank" rel="noopener noreferrer sponsored" class="btn-result-cta" data-campaign-id="${escapeHtml(campaign.id)}">
           ${escapeHtml(cta)}
+        </a>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Render Thank You Card Ad (Shown when download begins or completes)
+ */
+export function renderThankYouAd(containerEl, lang = 'ko') {
+  if (!containerEl) return;
+
+  const provider = getBannerProvider();
+
+  if (provider === 'adsterra' && ADS_CONFIG.adsterra.banners.thankYou?.key) {
+    const html = buildAdsterraBannerHtml(ADS_CONFIG.adsterra.banners.thankYou);
+    if (html) {
+      renderThirdPartyOnce(containerEl, html);
+      return;
+    }
+  }
+
+  // Native High-Converting Creator Affiliate Card
+  const campaign = getRandomAffiliateCampaign();
+  const title = pickLocale(campaign.title, lang);
+  const desc = pickLocale(campaign.desc, lang);
+  const cta = pickLocale(campaign.ctaText, lang);
+
+  containerEl.innerHTML = `
+    <div class="thank-you-ad-card">
+      <div class="thank-you-ad-badge-row">
+        <span class="ad-tag-subtle">SPONSORED RECOMMENDATION</span>
+        <span class="thank-you-ad-partner">${escapeHtml(campaign.logoEmoji)} ${escapeHtml(campaign.brand)}</span>
+        <span class="ad-discount-chip">${escapeHtml(campaign.discountBadge)}</span>
+      </div>
+      <div class="thank-you-ad-content">
+        <h4 class="thank-you-ad-title">${escapeHtml(title)}</h4>
+        <p class="thank-you-ad-desc">${escapeHtml(desc)}</p>
+        <a href="${escapeHtml(safeHttpUrl(campaign.ctaUrl))}" target="_blank" rel="noopener noreferrer sponsored" class="btn-thank-you-cta" data-campaign-id="${escapeHtml(campaign.id)}">
+          ${escapeHtml(cta)} ↗
         </a>
       </div>
     </div>

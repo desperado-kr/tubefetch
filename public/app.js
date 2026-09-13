@@ -4,9 +4,11 @@ import {
   ADS_CONFIG,
   renderTopBanner,
   renderResultBanner,
+  renderThankYouAd,
   renderAdGateContent,
   renderFloatingBanner,
   getAdGateDirectLink,
+  tryTriggerDirectLink,
   initOptionalAdScripts
 } from './ads-config.js';
 
@@ -60,6 +62,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const progressSize = document.getElementById('progressSize');
   const progressEta = document.getElementById('progressEta');
   const progressMessage = document.getElementById('progressMessage');
+
+  // Thank You / Download Started Card Elements
+  const thankYouCard = document.getElementById('thankYouCard');
+  const thankYouTitle = document.getElementById('thankYouTitle');
+  const thankYouDesc = document.getElementById('thankYouDesc');
+  const thankYouAdSlot = document.getElementById('thankYouAdSlot');
+  const closeThankYouBtn = document.getElementById('closeThankYouBtn');
+  const newDownloadBtn = document.getElementById('newDownloadBtn');
 
   const historySection = document.getElementById('historySection');
   const historyList = document.getElementById('historyList');
@@ -133,6 +143,9 @@ document.addEventListener('DOMContentLoaded', () => {
     renderFloatingBanner(floatingBottomAdSlot, currentLang);
     if (currentVideoData) {
       renderResultBanner(resultAdBannerSlot, currentLang);
+    }
+    if (thankYouCard && !thankYouCard.classList.contains('hidden')) {
+      renderThankYouAd(thankYouAdSlot, currentLang);
     }
   }
 
@@ -221,11 +234,38 @@ document.addEventListener('DOMContentLoaded', () => {
   skipAdBtn.addEventListener('click', () => {
     // Opening the SmartLink here (and not on countdown completion) keeps it
     // inside a real user gesture, so browsers do not block the popup.
-    const directLink = getAdGateDirectLink();
-    if (directLink) window.open(directLink, '_blank', 'noopener,noreferrer');
-
+    tryTriggerDirectLink(true);
     finishAdGate();
   });
+
+  // Thank You / Download Started Card Listeners & Helpers
+  if (closeThankYouBtn) {
+    closeThankYouBtn.addEventListener('click', hideThankYouCard);
+  }
+
+  if (newDownloadBtn) {
+    newDownloadBtn.addEventListener('click', () => {
+      hideThankYouCard();
+      resultSection.classList.add('hidden');
+      urlInput.value = '';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      urlInput.focus();
+    });
+  }
+
+  function showThankYouCard(label) {
+    if (!thankYouCard) return;
+    if (thankYouTitle && label) {
+      thankYouTitle.textContent = `${label} ${t('thank_you_title')}`;
+    }
+    renderThankYouAd(thankYouAdSlot, currentLang);
+    thankYouCard.classList.remove('hidden');
+    thankYouCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function hideThankYouCard() {
+    if (thankYouCard) thankYouCard.classList.add('hidden');
+  }
 
   function finishAdGate() {
     if (countdownTimer) {
@@ -274,6 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     hideError();
+    hideThankYouCard();
     resultSection.classList.add('hidden');
     loadingCard.classList.remove('hidden');
     setButtonLoading(true);
@@ -485,6 +526,9 @@ document.addEventListener('DOMContentLoaded', () => {
     link.click();
     document.body.removeChild(link);
 
+    tryTriggerDirectLink(false);
+    showThankYouCard(label);
+
     saveToHistory({
       id: currentVideoData.id,
       title: currentVideoData.title,
@@ -544,7 +588,8 @@ document.addEventListener('DOMContentLoaded', () => {
           currentEventSource.close();
           setTimeout(() => {
             progressModal.classList.add('hidden');
-          }, 3000);
+            showThankYouCard(label);
+          }, 1200);
         } else if (data.status === 'error') {
           progressStatusTitle.textContent = '오류 발생';
           progressMessage.textContent = data.message || '다운로드에 실패했습니다.';

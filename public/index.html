@@ -376,6 +376,44 @@
         <p id="progressMessage" class="progress-message">서버에서 최고화질 비디오 및 오디오 스트림을 수집 중입니다...</p>
       </div>
 
+      <!-- Thank You / Download Started Card -->
+      <div id="thankYouCard" class="card thank-you-card hidden">
+        <div class="thank-you-header">
+          <div class="thank-you-badge-row">
+            <span class="thank-you-badge" data-i18n="thank_you_badge">🎉 다운로드 시작됨!</span>
+            <button id="closeThankYouBtn" class="btn-icon-close" title="닫기" aria-label="Close">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
+          <h3 id="thankYouTitle" class="thank-you-title" data-i18n="thank_you_title">파일 다운로드가 시작되었습니다!</h3>
+          <p id="thankYouDesc" class="thank-you-desc" data-i18n="thank_you_desc">브라우저 다운로드 바에서 저장 진행률을 확인하세요. 잠시 후 다운로드 폴더에 저장됩니다.</p>
+        </div>
+
+        <!-- Thank You Sponsor / Creator Recommendation Box -->
+        <div class="thank-you-sponsor-box">
+          <div class="thank-you-sponsor-label">
+            <span class="sponsor-dot"></span>
+            <span data-i18n="thank_you_sponsor_hint">💡 다운로드 대기 중 추천 파트너</span>
+          </div>
+          <div id="thankYouAdSlot" class="thank-you-ad-slot">
+            <!-- Dynamically injected via ads-config.js -->
+          </div>
+        </div>
+
+        <div class="thank-you-actions">
+          <button id="newDownloadBtn" class="btn-new-download">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            <span data-i18n="thank_you_btn_new">다른 영상 다운로드</span>
+          </button>
+        </div>
+      </div>
+
       <!-- Recent Downloads / History -->
       <section id="historySection" class="history-section hidden">
         <div class="section-header">

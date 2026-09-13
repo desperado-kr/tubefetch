@@ -63,7 +63,12 @@ export const translations = {
     legal_2_desc: "다운로드받은 영상 및 음원을 타인에게 재배포하거나 인터넷/SNS에 재업로드하는 행위는 저작권법 위반에 해당합니다.",
     legal_3_title: "고화질 머지",
     legal_3_desc: "1080p 이상의 고화질 비디오는 FFmpeg를 통해 최고음질 오디오 트랙과 실시간으로 합성되어 고화질 MP4로 제공됩니다.",
-    direct_toast: "🚀 다운로드가 즉시 시작되었습니다!"
+    direct_toast: "🚀 다운로드가 즉시 시작되었습니다!",
+    thank_you_badge: "🎉 다운로드 시작됨!",
+    thank_you_title: "파일 다운로드가 시작되었습니다!",
+    thank_you_desc: "브라우저 다운로드 바에서 저장 진행률을 확인하세요. 잠시 후 다운로드 폴더에 저장됩니다.",
+    thank_you_btn_new: "다른 영상 다운로드",
+    thank_you_sponsor_hint: "💡 다운로드 대기 중 추천 파트너"
   },
   en: {
     brand_badge: "PRO",
@@ -123,7 +128,12 @@ export const translations = {
     legal_2_desc: "Redistributing or re-uploading downloaded media to social media or other platforms is strictly prohibited.",
     legal_3_title: "High-Res Merging",
     legal_3_desc: "1080p and higher resolutions are automatically muxed with original audio via FFmpeg.",
-    direct_toast: "🚀 Download started immediately!"
+    direct_toast: "🚀 Download started immediately!",
+    thank_you_badge: "🎉 Download Started!",
+    thank_you_title: "Your download has started!",
+    thank_you_desc: "Check your browser download bar for progress. The file will be saved shortly.",
+    thank_you_btn_new: "Download Another Video",
+    thank_you_sponsor_hint: "💡 Recommended Partners While You Wait"
   },
   ja: {
     brand_badge: "PRO",
@@ -183,7 +193,12 @@ export const translations = {
     legal_2_desc: "ダウンロードしたコンテンツをSNS等に再配布・再投稿することは禁止されています。",
     legal_3_title: "高画質合成",
     legal_3_desc: "1080p以上の動画はFFmpegを通じて最高音質オーディオと自動合成されます。",
-    direct_toast: "🚀 ダウンロードが開始されました！"
+    direct_toast: "🚀 ダウンロードが開始されました！",
+    thank_you_badge: "🎉 ダウンロード開始！",
+    thank_you_title: "ファイルのダウンロードが開始されました！",
+    thank_you_desc: "ブラウザのダウンロード進行状況をご確認ください。まもなく保存されます。",
+    thank_you_btn_new: "別の動画をダウンロード",
+    thank_you_sponsor_hint: "💡 ダウンロード待機中のおすすめツール"
   },
   zh: {
     brand_badge: "PRO",
@@ -243,7 +258,12 @@ export const translations = {
     legal_2_desc: "严禁将下载的媒体内容重新上传至社交平台或用于商业盈利。",
     legal_3_title: "高清流合成",
     legal_3_desc: "1080p 及以上画质会自动调用 FFmpeg 无损合并音视频轨道。",
-    direct_toast: "🚀 已直接启动下载！"
+    direct_toast: "🚀 已直接启动下载！",
+    thank_you_badge: "🎉 下载已启动！",
+    thank_you_title: "文件下载已开始！",
+    thank_you_desc: "请查看浏览器的下载管理器，文件很快将保存至您的下载目录。",
+    thank_you_btn_new: "下载其他视频",
+    thank_you_sponsor_hint: "💡 等待下载时的精选推荐工具"
   },
   es: {
     brand_badge: "PRO",
@@ -303,6 +323,11 @@ export const translations = {
     legal_2_desc: "Está prohibido redistribuir o volver a subir el contenido a redes sociales.",
     legal_3_title: "Fusión de Alta Resolución",
     legal_3_desc: "Los videos de 1080p o superiores se fusionan automáticamente mediante FFmpeg.",
-    direct_toast: "🚀 ¡Descarga iniciada inmediatamente!"
+    direct_toast: "🚀 ¡Descarga iniciada inmediatamente!",
+    thank_you_badge: "🎉 ¡Descarga Iniciada!",
+    thank_you_title: "¡Tu descarga ha comenzado!",
+    thank_you_desc: "Revisa la barra de descargas de tu navegador. El archivo se guardará en breve.",
+    thank_you_btn_new: "Descargar Otro Video",
+    thank_you_sponsor_hint: "💡 Herramientas Recomendadas Mientras Esperas"
   }
 };

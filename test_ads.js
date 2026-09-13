@@ -1,4 +1,4 @@
-﻿import fs from 'fs';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ADS_CONFIG } from './public/ads-config.js';
@@ -20,17 +20,17 @@ async function verifyAdsSystem() {
 
   // 2. Check index.html ad slots
   const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
-  const slots = ['topAdBannerSlot', 'resultAdBannerSlot', 'floatingBottomAdSlot', 'adGateBannerContainer'];
+  const slots = ['topAdBannerSlot', 'resultAdBannerSlot', 'floatingBottomAdSlot', 'adGateBannerContainer', 'thankYouAdSlot'];
   for (const slot of slots) {
     if (!html.includes(slot)) {
       throw new Error(`Missing slot in HTML: ${slot}`);
     }
   }
-  console.log('✅ index.html contains all 4 ad containers (Top, In-Feed Result, Modal Ad Gate, Floating Bottom).');
+  console.log('✅ index.html contains all 5 ad containers (Top, In-Feed Result, Modal Ad Gate, Floating Bottom, Thank You).');
 
   // 3. Check CSS rules
   const css = fs.readFileSync(path.join(__dirname, 'public', 'style.css'), 'utf8');
-  const cssClasses = ['.ad-banner-slot', '.ad-result-card', '.modal-card.ad-gate-card', '.floating-bottom-ad-slot'];
+  const cssClasses = ['.ad-banner-slot', '.ad-result-card', '.modal-card.ad-gate-card', '.floating-bottom-ad-slot', '.thank-you-card'];
   for (const cls of cssClasses) {
     if (!css.includes(cls)) {
       throw new Error(`Missing CSS class: ${cls}`);
@@ -40,10 +40,10 @@ async function verifyAdsSystem() {
 
   // 4. Check app.js logic
   const appJs = fs.readFileSync(path.join(__dirname, 'public', 'app.js'), 'utf8');
-  if (!appJs.includes('renderAdGateContent') || !appJs.includes('openAdGateModal') || !appJs.includes('renderFloatingBanner')) {
-    throw new Error('app.js is missing ad gate or banner renderer calls');
+  if (!appJs.includes('renderAdGateContent') || !appJs.includes('openAdGateModal') || !appJs.includes('renderFloatingBanner') || !appJs.includes('renderThankYouAd') || !appJs.includes('tryTriggerDirectLink')) {
+    throw new Error('app.js is missing ad gate, direct link, or banner renderer calls');
   }
-  console.log('✅ app.js successfully integrates ads-config, ad gate triggers, and multi-lingual refreshes.');
+  console.log('✅ app.js successfully integrates ads-config, ad gate triggers, thank-you cards, and multi-lingual refreshes.');
 
   console.log('🎉 Ad Monetization System Verification Passed 100%!');
 }
